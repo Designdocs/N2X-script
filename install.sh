@@ -5,6 +5,46 @@ green='\033[0;32m'
 yellow='\033[0;33m'
 plain='\033[0m'
 
+log_info() { echo -e "${green}$*${plain}"; }
+log_warn() { echo -e "${yellow}$*${plain}"; }
+log_error() { echo -e "${red}$*${plain}"; }
+die() { log_error "$*"; exit 1; }
+
+require_cmd() {
+    command -v "$1" >/dev/null 2>&1 || die "缺少依赖命令: $1，请重试安装或手动安装。"
+}
+
+download_file() {
+    local url="$1" out="$2"
+    if command -v wget >/dev/null 2>&1; then
+        wget --no-check-certificate -N --progress=bar --tries=3 --timeout=15 -O "$out" "$url"
+    else
+        curl -fL --retry 3 --retry-delay 2 -o "$out" "$url"
+    fi
+}
+
+verify_sha256_if_possible() {
+    local zip_url="$1" zip_path="$2"
+    if ! command -v openssl >/dev/null 2>&1; then
+        return 0
+    fi
+    local dgst_url="${zip_url}.dgst"
+    local dgst_path="${zip_path}.dgst"
+    if download_file "$dgst_url" "$dgst_path" >/dev/null 2>&1; then
+        local expected
+        expected="$(grep -E 'SHA256' "$dgst_path" | awk '{print $2}' | head -n1)"
+        if [[ -n "$expected" ]]; then
+            local actual
+            actual="$(openssl dgst -sha256 "$zip_path" | awk '{print $2}')"
+            if [[ "$expected" != "$actual" ]]; then
+                die "校验失败：sha256 不匹配，请重新下载。"
+            fi
+            log_info "sha256 校验通过。"
+        fi
+    fi
+    rm -f "$dgst_path" >/dev/null 2>&1 || true
+}
+
 cur_dir=$(pwd)
 
 # check root
@@ -134,30 +174,39 @@ install_N2X() {
     if  [ $# == 0 ] ;then
         last_version=$(curl -Ls "https://api.github.com/repos/Designdocs/N2X/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
         if [[ ! -n "$last_version" ]]; then
-            echo -e "${red}检测 N2X 版本失败，可能是超出 Github API 限制，请稍后再试，或手动指定 N2X 版本安装${plain}"
-            exit 1
+            die "检测 N2X 版本失败，可能是超出 Github API 限制，请稍后再试，或手动指定 N2X 版本安装"
         fi
-        echo -e "检测到 N2X 最新版本：${last_version}，开始安装"
-        wget --no-check-certificate -N --progress=bar -O /usr/local/N2X/N2X-linux.zip https://github.com/Designdocs/N2X/releases/download/${last_version}/N2X-linux-${arch}.zip
-        if [[ $? -ne 0 ]]; then
-            echo -e "${red}下载 N2X 失败，请确保你的服务器能够下载 Github 的文件${plain}"
-            exit 1
-        fi
+        log_info "检测到 N2X 最新版本：${last_version}，开始安装"
+        url="https://github.com/Designdocs/N2X/releases/download/${last_version}/N2X-linux-${arch}.zip"
+        download_file "$url" /usr/local/N2X/N2X-linux.zip || die "下载 N2X 失败：$url"
+        verify_sha256_if_possible "$url" /usr/local/N2X/N2X-linux.zip
     else
         last_version=$1
         url="https://github.com/Designdocs/N2X/releases/download/${last_version}/N2X-linux-${arch}.zip"
-        echo -e "开始安装 N2X $1"
-        wget --no-check-certificate -N --progress=bar -O /usr/local/N2X/N2X-linux.zip ${url}
-        if [[ $? -ne 0 ]]; then
-            echo -e "${red}下载 N2X $1 失败，请确保此版本存在${plain}"
-            exit 1
-        fi
+        log_info "开始安装 N2X $1"
+        download_file "$url" /usr/local/N2X/N2X-linux.zip || die "下载 N2X $1 失败：$url"
+        verify_sha256_if_possible "$url" /usr/local/N2X/N2X-linux.zip
     fi
 
     unzip N2X-linux.zip
     rm N2X-linux.zip -f
     chmod +x N2X
     mkdir /etc/N2X/ -p
+    # 旧配置迁移提示（仅在首次安装且检测到 V2bX 配置时）
+    if [[ ! -f /etc/N2X/config.json && -f /etc/V2bX/config.json ]]; then
+        echo -e "${yellow}检测到旧的 V2bX 配置，是否迁移到 N2X？${plain}"
+        read -rp "迁移旧配置到 /etc/N2X/config.json [Y/n]: " do_migrate
+        do_migrate="${do_migrate:-Y}"
+        if [[ "$do_migrate" =~ ^[Yy]$ ]]; then
+            cp /etc/V2bX/config.json /etc/N2X/config.json
+            sed -i.bak \
+                -e 's#/etc/V2bX#/etc/N2X#g' \
+                -e 's#/usr/local/V2bX#/usr/local/N2X#g' \
+                -e 's#V2bX#N2X#g' \
+                /etc/N2X/config.json || true
+            log_info "已迁移旧配置，并备份为 /etc/N2X/config.json.bak"
+        fi
+    fi
     cp geoip.dat /etc/N2X/
     cp geosite.dat /etc/N2X/
     if [[ x"${release}" == x"alpine" ]]; then
@@ -181,7 +230,7 @@ depend() {
 EOF
         chmod +x /etc/init.d/N2X
         rc-update add N2X default
-        echo -e "${green}N2X ${last_version}${plain} 安装完成，已设置开机自启"
+        log_info "N2X ${last_version} 安装完成，已设置开机自启"
     else
         rm /etc/systemd/system/N2X.service -f
         cat <<EOF > /etc/systemd/system/N2X.service
@@ -209,11 +258,11 @@ EOF
         systemctl daemon-reload
         systemctl stop N2X
         systemctl enable N2X
-        echo -e "${green}N2X ${last_version}${plain} 安装完成，已设置开机自启"
+        log_info "N2X ${last_version} 安装完成，已设置开机自启"
     fi
 
     if [[ ! -f /etc/N2X/config.json ]]; then
-        cp config.json /etc/N2X/
+        cp config.json /etc/N2X/ || true
         echo -e ""
         echo -e "全新安装，请先参看教程：https://github.com/Designdocs/N2X-script/wiki ，配置必要的内容"
         first_install=true
@@ -227,9 +276,10 @@ EOF
         check_status
         echo -e ""
         if [[ $? == 0 ]]; then
-            echo -e "${green}N2X 重启成功${plain}"
+            log_info "N2X 重启成功"
         else
-            echo -e "${red}N2X 可能启动失败，请稍后使用 N2X log 查看日志信息，若无法启动，则可能更改了配置格式，请前往 wiki 查看：https://github.com/Designdocs/N2X/wiki${plain}"
+            log_warn "N2X 可能启动失败，请使用 N2X log 查看日志，或运行：journalctl -u N2X -n 50 --no-pager"
+            log_warn "Wiki: https://github.com/Designdocs/N2X/wiki"
         fi
         first_install=false
     fi
@@ -277,16 +327,21 @@ EOF
     echo "------------------------------------------"
     # 首次安装询问是否生成配置文件
     if [[ $first_install == true ]]; then
-        read -rp "检测到你为第一次安装N2X,是否自动直接生成配置文件？(y/n): " if_generate
+        read -rp "检测到你为第一次安装N2X，是否自动生成配置文件？[Y/n]: " if_generate
+        if_generate="${if_generate:-Y}"
         if [[ $if_generate == [Yy] ]]; then
             curl -o ./initconfig.sh -Ls https://raw.githubusercontent.com/Designdocs/N2X-script/main/initconfig.sh
             source initconfig.sh
             rm initconfig.sh -f
             generate_config_file
+        else
+            log_warn "你可以稍后运行：N2X generate 生成配置文件。"
         fi
     fi
 }
 
 echo -e "${green}开始安装${plain}"
 install_base
+require_cmd curl
+require_cmd unzip
 install_N2X $1

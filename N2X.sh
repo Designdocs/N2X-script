@@ -201,6 +201,7 @@ start() {
             echo -e "${green}N2X 启动成功，请使用 N2X log 查看运行日志${plain}"
         else
             echo -e "${red}N2X可能启动失败，请稍后使用 N2X log 查看日志信息${plain}"
+            echo -e "${yellow}也可运行：journalctl -u N2X -n 50 --no-pager${plain}"
         fi
     fi
 
@@ -240,6 +241,7 @@ restart() {
         echo -e "${green}N2X 重启成功，请使用 N2X log 查看运行日志${plain}"
     else
         echo -e "${red}N2X可能启动失败，请稍后使用 N2X log 查看日志信息${plain}"
+        echo -e "${yellow}也可运行：journalctl -u N2X -n 50 --no-pager${plain}"
     fi
     if [[ $# == 0 ]]; then
         before_show_menu
@@ -633,6 +635,10 @@ generate_config_file() {
     if [[ "$continue_prompt" =~ ^[Nn][Oo]? ]]; then
         exit 0
     fi
+
+    if [[ -d /etc/V2bX ]]; then
+        echo -e "${yellow}提示：检测到旧目录 /etc/V2bX，本向导生成的新配置会使用 /etc/N2X 路径。${plain}"
+    fi
     
     nodes_config=()
     first_node=true
@@ -923,7 +929,13 @@ acl:
 masquerade:
   type: 404
 EOF
-    echo -e "${green}N2X 配置文件生成完成，正在重新启动 N2X 服务${plain}"
+    echo -e "${green}N2X 配置文件生成完成${plain}"
+    echo -e "${yellow}下一步建议：${plain}"
+    echo -e "1. 检查 /etc/N2X/config.json 是否正确"
+    echo -e "2. 若启用 sing 核心，确保 /etc/N2X/sing_origin.json 存在（缺失可再次 generate）"
+    echo -e "3. 证书模式为 dns/http 时确认域名解析与 API 参数无误"
+    echo -e "4. 如有自定义 DNS/路由，可编辑 /etc/N2X/dns.json 与 /etc/N2X/route.json"
+    echo -e "${yellow}正在重启 N2X 服务...${plain}"
     restart 0
     before_show_menu
 }
