@@ -229,7 +229,7 @@ EOF
         if [[ $? == 0 ]]; then
             echo -e "${green}N2X 重启成功${plain}"
         else
-            echo -e "${red}N2X 可能启动失败，请稍后使用 N2X log 查看日志信息，若无法启动，则可能更改了配置格式，请前往 wiki 查看：https://github.com/N2X-project/N2X/wiki${plain}"
+            echo -e "${red}N2X 可能启动失败，请稍后使用 N2X log 查看日志信息，若无法启动，则可能更改了配置格式，请前往 wiki 查看：https://github.com/Designdocs/N2X/wiki${plain}"
         fi
         first_install=false
     fi
