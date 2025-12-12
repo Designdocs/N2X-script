@@ -96,7 +96,7 @@ before_show_menu() {
 }
 
 install() {
-    bash <(curl -Ls https://raw.githubusercontent.com/Designdocs/N2X-script/master/install.sh)
+    bash <(curl -Ls https://raw.githubusercontent.com/Designdocs/N2X-script/main/install.sh)
     if [[ $? == 0 ]]; then
         if [[ $# == 0 ]]; then
             start
@@ -112,7 +112,7 @@ update() {
     else
         version=$2
     fi
-    bash <(curl -Ls https://raw.githubusercontent.com/Designdocs/N2X-script/master/install.sh) $version
+    bash <(curl -Ls https://raw.githubusercontent.com/Designdocs/N2X-script/main/install.sh) $version
     if [[ $? == 0 ]]; then
         echo -e "${green}更新完成，已自动重启 N2X，请使用 N2X log 查看运行日志${plain}"
         exit
@@ -300,7 +300,7 @@ install_bbr() {
 }
 
 update_shell() {
-    wget -O /usr/bin/N2X -N --no-check-certificate https://raw.githubusercontent.com/Designdocs/N2X-script/master/N2X.sh
+    wget -O /usr/bin/N2X -N --no-check-certificate https://raw.githubusercontent.com/Designdocs/N2X-script/main/N2X.sh
     if [[ $? != 0 ]]; then
         echo ""
         echo -e "${red}下载脚本失败，请检查本机能否连接 Github${plain}"

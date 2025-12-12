@@ -246,7 +246,7 @@ EOF
     if [[ ! -f /etc/N2X/custom_inbound.json ]]; then
         cp custom_inbound.json /etc/N2X/
     fi
-    curl -o /usr/bin/N2X -Ls https://raw.githubusercontent.com/Designdocs/N2X-script/master/N2X.sh
+    curl -o /usr/bin/N2X -Ls https://raw.githubusercontent.com/Designdocs/N2X-script/main/N2X.sh
     chmod +x /usr/bin/N2X
     if [ ! -L /usr/bin/n2x ]; then
         ln -s /usr/bin/N2X /usr/bin/n2x
@@ -277,7 +277,7 @@ EOF
     if [[ $first_install == true ]]; then
         read -rp "检测到你为第一次安装N2X,是否自动直接生成配置文件？(y/n): " if_generate
         if [[ $if_generate == [Yy] ]]; then
-            curl -o ./initconfig.sh -Ls https://raw.githubusercontent.com/Designdocs/N2X-script/master/initconfig.sh
+            curl -o ./initconfig.sh -Ls https://raw.githubusercontent.com/Designdocs/N2X-script/main/initconfig.sh
             source initconfig.sh
             rm initconfig.sh -f
             generate_config_file

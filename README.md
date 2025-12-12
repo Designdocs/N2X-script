@@ -3,5 +3,5 @@
 # 一键安装
 
 ```
-wget -N https://raw.githubusercontent.com/Designdocs/N2X-script/master/install.sh && bash install.sh
+wget -N https://raw.githubusercontent.com/Designdocs/N2X-script/main/install.sh && bash install.sh
 ```
