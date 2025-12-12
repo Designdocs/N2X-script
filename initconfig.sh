@@ -1,6 +1,13 @@
 #!/bin/bash
 # 一键配置
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$SCRIPT_DIR/config_gen.sh" ]]; then
+    source "$SCRIPT_DIR/config_gen.sh"
+elif [[ -f /usr/local/N2X/config_gen.sh ]]; then
+    source /usr/local/N2X/config_gen.sh
+fi
+
 # 检查系统是否有 IPv6 地址
 check_ipv6_support() {
     if ip -6 addr | grep -q "inet6"; then

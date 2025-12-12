@@ -5,6 +5,13 @@ green='\033[0;32m'
 yellow='\033[0;33m'
 plain='\033[0m'
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$SCRIPT_DIR/config_gen.sh" ]]; then
+    source "$SCRIPT_DIR/config_gen.sh"
+elif [[ -f /usr/local/N2X/config_gen.sh ]]; then
+    source /usr/local/N2X/config_gen.sh
+fi
+
 # check root
 [[ $EUID -ne 0 ]] && echo -e "${red}错误: ${plain} 必须使用root用户运行此脚本！\n" && exit 1
 

@@ -215,7 +215,7 @@ EOF
     if [[ ! -f /etc/N2X/config.json ]]; then
         cp config.json /etc/N2X/
         echo -e ""
-        echo -e "全新安装，请先参看教程：https://n2x.v-50.me/，配置必要的内容"
+        echo -e "全新安装，请先参看教程：https://github.com/Designdocs/N2X-script/wiki ，配置必要的内容"
         first_install=true
     else
         if [[ x"${release}" == x"alpine" ]]; then
@@ -247,6 +247,8 @@ EOF
         cp custom_inbound.json /etc/N2X/
     fi
     curl -o /usr/bin/N2X -Ls https://raw.githubusercontent.com/Designdocs/N2X-script/main/N2X.sh
+    mkdir -p /usr/local/N2X/
+    curl -o /usr/local/N2X/config_gen.sh -Ls https://raw.githubusercontent.com/Designdocs/N2X-script/main/config_gen.sh
     chmod +x /usr/bin/N2X
     if [ ! -L /usr/bin/n2x ]; then
         ln -s /usr/bin/N2X /usr/bin/n2x
