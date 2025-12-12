@@ -1,5 +1,5 @@
 [Unit]
-Description=V2bX Service
+Description=N2X Service
 After=network.target nss-lookup.target
 Wants=network.target
 
@@ -11,8 +11,8 @@ LimitAS=infinity
 LimitRSS=infinity
 LimitCORE=infinity
 LimitNOFILE=999999
-WorkingDirectory=/usr/local/V2bX/
-ExecStart=/usr/local/V2bX/V2bX server
+WorkingDirectory=/usr/local/N2X/
+ExecStart=/usr/local/N2X/N2X server
 Restart=always
 RestartSec=10
 
