@@ -135,7 +135,7 @@ ${xray_dns_opts}            "EnableProxyProtocol": false,
             "CertConfig": {
                 "CertMode": "$certmode",
                 "RejectUnknownSni": false,
-                "CertDomain": "$certdomain",
+                "CertDomain": "\${N2X_CERT_DOMAIN:-$certdomain}",
                 "CertFile": "/etc/N2X/fullchain.cer",
                 "KeyFile": "/etc/N2X/cert.key",
                 "Email": "\${N2X_CERT_EMAIL:-}",
@@ -166,7 +166,7 @@ EOF
             "CertConfig": {
                 "CertMode": "$certmode",
                 "RejectUnknownSni": false,
-                "CertDomain": "$certdomain",
+                "CertDomain": "\${N2X_CERT_DOMAIN:-$certdomain}",
                 "CertFile": "/etc/N2X/fullchain.cer",
                 "KeyFile": "/etc/N2X/cert.key",
                 "Email": "\${N2X_CERT_EMAIL:-}",
@@ -196,7 +196,7 @@ EOF
             "CertConfig": {
                 "CertMode": "$certmode",
                 "RejectUnknownSni": false,
-                "CertDomain": "$certdomain",
+                "CertDomain": "\${N2X_CERT_DOMAIN:-$certdomain}",
                 "CertFile": "/etc/N2X/fullchain.cer",
                 "KeyFile": "/etc/N2X/cert.key",
                 "Email": "\${N2X_CERT_EMAIL:-}",

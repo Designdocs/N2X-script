@@ -139,7 +139,7 @@ ${xray_dns_opts}            "EnableProxyProtocol": false,
             "CertConfig": {
                 "CertMode": "$certmode",
                 "RejectUnknownSni": false,
-                "CertDomain": "$certdomain",
+                "CertDomain": "\${N2X_CERT_DOMAIN:-$certdomain}",
                 "CertFile": "/etc/N2X/fullchain.cer",
                 "KeyFile": "/etc/N2X/cert.key",
                 "Email": "\${N2X_CERT_EMAIL:-}",
@@ -170,7 +170,7 @@ EOF
             "CertConfig": {
                 "CertMode": "$certmode",
                 "RejectUnknownSni": false,
-                "CertDomain": "$certdomain",
+                "CertDomain": "\${N2X_CERT_DOMAIN:-$certdomain}",
                 "CertFile": "/etc/N2X/fullchain.cer",
                 "KeyFile": "/etc/N2X/cert.key",
                 "Email": "\${N2X_CERT_EMAIL:-}",
@@ -200,7 +200,7 @@ EOF
             "CertConfig": {
                 "CertMode": "$certmode",
                 "RejectUnknownSni": false,
-                "CertDomain": "$certdomain",
+                "CertDomain": "\${N2X_CERT_DOMAIN:-$certdomain}",
                 "CertFile": "/etc/N2X/fullchain.cer",
                 "KeyFile": "/etc/N2X/cert.key",
                 "Email": "\${N2X_CERT_EMAIL:-}",
@@ -374,6 +374,7 @@ N2X_API_HOST=https://example.com
 N2X_API_KEY=please_fill_me
 
 # Cert (used by lego when CertMode=dns/http/self)
+N2X_CERT_DOMAIN=example.com
 N2X_CERT_PROVIDER=cloudflare
 N2X_CERT_EMAIL=you@example.com
 
