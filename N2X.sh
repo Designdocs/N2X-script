@@ -517,7 +517,6 @@ add_node_config() {
             2 ) certmode="dns" ;;
             3 ) certmode="self" ;;
         esac
-        read -rp "请输入节点证书域名(example.com)：" certdomain
         if [ "$certmode" != "http" ]; then
             echo -e "${red}请手动修改配置文件后重启N2X！${plain}"
         fi

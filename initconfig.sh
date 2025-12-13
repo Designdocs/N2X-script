@@ -103,7 +103,6 @@ add_node_config() {
             2 ) certmode="dns" ;;
             3 ) certmode="self" ;;
         esac
-        read -rp "请输入节点证书域名(example.com)：" certdomain
         if [ "$certmode" != "http" ]; then
             echo -e "${red}请手动修改配置文件后重启N2X！${plain}"
         fi
@@ -267,8 +266,7 @@ generate_config_file() {
     cores_config="["
     xray_dns_config_line=""
     if [ "$custom_dns_enabled" = true ]; then
-        xray_dns_config_line="
-        \\\"DnsConfigPath\\\": \\\"/etc/N2X/dns.json\\\","
+        xray_dns_config_line='        "DnsConfigPath": "/etc/N2X/dns.json",'
     fi
 
     # 检查并添加xray核心配置
