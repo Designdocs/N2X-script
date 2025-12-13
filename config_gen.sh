@@ -109,13 +109,19 @@ add_node_config() {
     if [ "$ipv6_support" -eq 1 ]; then
         listen_ip="::"
     fi
+    xray_dns_opts=""
+    if [ "$custom_dns_enabled" = true ]; then
+        xray_dns_opts='            "EnableDNS": true,
+            "DNSType": "UseIP",
+'
+    fi
     node_config=""
     if [ "$core_type" == "1" ]; then
     node_config=$(cat <<EOF
 {
             "Core": "$core",
-            "ApiHost": "$ApiHost",
-            "ApiKey": "$ApiKey",
+            "ApiHost": "\${N2X_API_HOST}",
+            "ApiKey": "\${N2X_API_KEY}",
             "NodeID": $NodeID,
             "NodeType": "$NodeType",
             "Timeout": 30,
@@ -123,20 +129,20 @@ add_node_config() {
             "SendIP": "0.0.0.0",
             "DeviceOnlineMinTraffic": 200,
             "MinReportTraffic": 0,
-            "EnableProxyProtocol": false,
+${xray_dns_opts}            "EnableProxyProtocol": false,
             "EnableUot": true,
             "EnableTFO": true,
-            "DNSType": "UseIPv4",
             "CertConfig": {
                 "CertMode": "$certmode",
                 "RejectUnknownSni": false,
                 "CertDomain": "$certdomain",
                 "CertFile": "/etc/N2X/fullchain.cer",
                 "KeyFile": "/etc/N2X/cert.key",
-                "Email": "n2x@github.com",
-                "Provider": "cloudflare",
+                "Email": "\${N2X_CERT_EMAIL:-}",
+                "Provider": "\${N2X_CERT_PROVIDER:-cloudflare}",
                 "DNSEnv": {
-                    "EnvName": "env1"
+                    "CF_API_KEY": "\${CF_API_KEY:-}",
+                    "CLOUDFLARE_EMAIL": "\${CLOUDFLARE_EMAIL:-}"
                 }
             }
         },
@@ -146,8 +152,8 @@ EOF
     node_config=$(cat <<EOF
 {
             "Core": "$core",
-            "ApiHost": "$ApiHost",
-            "ApiKey": "$ApiKey",
+            "ApiHost": "\${N2X_API_HOST}",
+            "ApiKey": "\${N2X_API_KEY}",
             "NodeID": $NodeID,
             "NodeType": "$NodeType",
             "Timeout": 30,
@@ -163,10 +169,11 @@ EOF
                 "CertDomain": "$certdomain",
                 "CertFile": "/etc/N2X/fullchain.cer",
                 "KeyFile": "/etc/N2X/cert.key",
-                "Email": "n2x@github.com",
-                "Provider": "cloudflare",
+                "Email": "\${N2X_CERT_EMAIL:-}",
+                "Provider": "\${N2X_CERT_PROVIDER:-cloudflare}",
                 "DNSEnv": {
-                    "EnvName": "env1"
+                    "CF_API_KEY": "\${CF_API_KEY:-}",
+                    "CLOUDFLARE_EMAIL": "\${CLOUDFLARE_EMAIL:-}"
                 }
             }
         },
@@ -176,8 +183,8 @@ EOF
     node_config=$(cat <<EOF
 {
             "Core": "$core",
-            "ApiHost": "$ApiHost",
-            "ApiKey": "$ApiKey",
+            "ApiHost": "\${N2X_API_HOST}",
+            "ApiKey": "\${N2X_API_KEY}",
             "NodeID": $NodeID,
             "NodeType": "$NodeType",
             "Hysteria2ConfigPath": "/etc/N2X/hy2config.yaml",
@@ -192,10 +199,11 @@ EOF
                 "CertDomain": "$certdomain",
                 "CertFile": "/etc/N2X/fullchain.cer",
                 "KeyFile": "/etc/N2X/cert.key",
-                "Email": "n2x@github.com",
-                "Provider": "cloudflare",
+                "Email": "\${N2X_CERT_EMAIL:-}",
+                "Provider": "\${N2X_CERT_PROVIDER:-cloudflare}",
                 "DNSEnv": {
-                    "EnvName": "env1"
+                    "CF_API_KEY": "\${CF_API_KEY:-}",
+                    "CLOUDFLARE_EMAIL": "\${CLOUDFLARE_EMAIL:-}"
                 }
             }
         },

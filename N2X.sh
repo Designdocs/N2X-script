@@ -554,7 +554,8 @@ add_node_config() {
                 "Email": "n2x@github.com",
                 "Provider": "cloudflare",
                 "DNSEnv": {
-                    "EnvName": "env1"
+                    "CF_API_KEY": "\${CF_API_KEY:-}",
+                    "CLOUDFLARE_EMAIL": "\${CLOUDFLARE_EMAIL:-}"
                 }
             }
         },
@@ -584,7 +585,8 @@ EOF
                 "Email": "n2x@github.com",
                 "Provider": "cloudflare",
                 "DNSEnv": {
-                    "EnvName": "env1"
+                    "CF_API_KEY": "\${CF_API_KEY:-}",
+                    "CLOUDFLARE_EMAIL": "\${CLOUDFLARE_EMAIL:-}"
                 }
             }
         },
@@ -613,7 +615,8 @@ EOF
                 "Email": "n2x@github.com",
                 "Provider": "cloudflare",
                 "DNSEnv": {
-                    "EnvName": "env1"
+                    "CF_API_KEY": "\${CF_API_KEY:-}",
+                    "CLOUDFLARE_EMAIL": "\${CLOUDFLARE_EMAIL:-}"
                 }
             }
         },

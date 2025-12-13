@@ -113,13 +113,19 @@ add_node_config() {
     if [ "$ipv6_support" -eq 1 ]; then
         listen_ip="::"
     fi
+    xray_dns_opts=""
+    if [ "$custom_dns_enabled" = true ]; then
+        xray_dns_opts='            "EnableDNS": true,
+            "DNSType": "UseIP",
+'
+    fi
     node_config=""
     if [ "$core_type" == "1" ]; then 
     node_config=$(cat <<EOF
 {
             "Core": "$core",
-            "ApiHost": "$ApiHost",
-            "ApiKey": "$ApiKey",
+            "ApiHost": "\${N2X_API_HOST}",
+            "ApiKey": "\${N2X_API_KEY}",
             "NodeID": $NodeID,
             "NodeType": "$NodeType",
             "Timeout": 30,
@@ -127,20 +133,20 @@ add_node_config() {
             "SendIP": "0.0.0.0",
             "DeviceOnlineMinTraffic": 200,
             "MinReportTraffic": 0,
-            "EnableProxyProtocol": false,
+${xray_dns_opts}            "EnableProxyProtocol": false,
             "EnableUot": true,
             "EnableTFO": true,
-            "DNSType": "UseIPv4",
             "CertConfig": {
                 "CertMode": "$certmode",
                 "RejectUnknownSni": false,
                 "CertDomain": "$certdomain",
                 "CertFile": "/etc/N2X/fullchain.cer",
                 "KeyFile": "/etc/N2X/cert.key",
-                "Email": "n2x@github.com",
-                "Provider": "cloudflare",
+                "Email": "\${N2X_CERT_EMAIL:-}",
+                "Provider": "\${N2X_CERT_PROVIDER:-cloudflare}",
                 "DNSEnv": {
-                    "EnvName": "env1"
+                    "CF_API_KEY": "\${CF_API_KEY:-}",
+                    "CLOUDFLARE_EMAIL": "\${CLOUDFLARE_EMAIL:-}"
                 }
             }
         },
@@ -150,8 +156,8 @@ EOF
     node_config=$(cat <<EOF
 {
             "Core": "$core",
-            "ApiHost": "$ApiHost",
-            "ApiKey": "$ApiKey",
+            "ApiHost": "\${N2X_API_HOST}",
+            "ApiKey": "\${N2X_API_KEY}",
             "NodeID": $NodeID,
             "NodeType": "$NodeType",
             "Timeout": 30,
@@ -167,10 +173,11 @@ EOF
                 "CertDomain": "$certdomain",
                 "CertFile": "/etc/N2X/fullchain.cer",
                 "KeyFile": "/etc/N2X/cert.key",
-                "Email": "n2x@github.com",
-                "Provider": "cloudflare",
+                "Email": "\${N2X_CERT_EMAIL:-}",
+                "Provider": "\${N2X_CERT_PROVIDER:-cloudflare}",
                 "DNSEnv": {
-                    "EnvName": "env1"
+                    "CF_API_KEY": "\${CF_API_KEY:-}",
+                    "CLOUDFLARE_EMAIL": "\${CLOUDFLARE_EMAIL:-}"
                 }
             }
         },
@@ -180,8 +187,8 @@ EOF
     node_config=$(cat <<EOF
 {
             "Core": "$core",
-            "ApiHost": "$ApiHost",
-            "ApiKey": "$ApiKey",
+            "ApiHost": "\${N2X_API_HOST}",
+            "ApiKey": "\${N2X_API_KEY}",
             "NodeID": $NodeID,
             "NodeType": "$NodeType",
             "Hysteria2ConfigPath": "/etc/N2X/hy2config.yaml",
@@ -196,10 +203,11 @@ EOF
                 "CertDomain": "$certdomain",
                 "CertFile": "/etc/N2X/fullchain.cer",
                 "KeyFile": "/etc/N2X/cert.key",
-                "Email": "n2x@github.com",
-                "Provider": "cloudflare",
+                "Email": "\${N2X_CERT_EMAIL:-}",
+                "Provider": "\${N2X_CERT_PROVIDER:-cloudflare}",
                 "DNSEnv": {
-                    "EnvName": "env1"
+                    "CF_API_KEY": "\${CF_API_KEY:-}",
+                    "CLOUDFLARE_EMAIL": "\${CLOUDFLARE_EMAIL:-}"
                 }
             }
         },
@@ -225,33 +233,31 @@ generate_config_file() {
     if [[ -d /etc/V2bX ]]; then
         echo -e "${yellow}提示：检测到旧目录 /etc/V2bX，本向导生成的新配置会使用 /etc/N2X 路径。${plain}"
     fi
+
+    echo -e "${yellow}提示：本向导会在 config.json 中使用环境变量占位符（例如 \\${N2X_API_KEY}），${plain}"
+    echo -e "${yellow}      请自行创建 /etc/N2X/.env（参考 /etc/N2X/.env.example）写入真实值。${plain}"
     
     nodes_config=()
     first_node=true
     core_xray=false
     core_sing=false
     core_hysteria2=false
-    fixed_api_info=false
-    check_api=false
+
+    read -rp "是否开启自定义 DNS（仅 xray 生效：DnsConfigPath=/etc/N2X/dns.json + xray 节点 EnableDNS/DNSType=UseIP）？(y/n) " enable_custom_dns
+    if [[ "$enable_custom_dns" == "y" || "$enable_custom_dns" == "Y" ]]; then
+        custom_dns_enabled=true
+    else
+        custom_dns_enabled=false
+    fi
     
     while true; do
         if [ "$first_node" = true ]; then
-            read -rp "请输入机场网址(https://example.com)：" ApiHost
-            read -rp "请输入面板对接API Key：" ApiKey
-            read -rp "是否设置固定的机场网址和API Key？(y/n)" fixed_api
-            if [ "$fixed_api" = "y" ] || [ "$fixed_api" = "Y" ]; then
-                fixed_api_info=true
-                echo -e "${red}成功固定地址${plain}"
-            fi
             first_node=false
             add_node_config
         else
             read -rp "是否继续添加节点配置？(回车继续，输入n或no退出)" continue_adding_node
             if [[ "$continue_adding_node" =~ ^[Nn][Oo]? ]]; then
                 break
-            elif [ "$fixed_api_info" = false ]; then
-                read -rp "请输入机场网址(https://example.com)：" ApiHost
-                read -rp "请输入面板对接API Key：" ApiKey
             fi
             add_node_config
         fi
@@ -259,6 +265,11 @@ generate_config_file() {
 
     # 初始化核心配置数组
     cores_config="["
+    xray_dns_config_line=""
+    if [ "$custom_dns_enabled" = true ]; then
+        xray_dns_config_line="
+        \\\"DnsConfigPath\\\": \\\"/etc/N2X/dns.json\\\","
+    fi
 
     # 检查并添加xray核心配置
     if [ "$core_xray" = true ]; then
@@ -269,6 +280,7 @@ generate_config_file() {
             \"Level\": \"error\",
             \"ErrorPath\": \"/etc/N2X/error.log\"
         },
+${xray_dns_config_line}
         \"OutboundConfigPath\": \"/etc/N2X/custom_outbound.json\",
         \"RouteConfigPath\": \"/etc/N2X/route.json\"
     },"
@@ -326,6 +338,41 @@ generate_config_file() {
     "Nodes": [$formatted_nodes_config]
 }
 EOF
+
+    # 如果启用了自定义 DNS，确保 dns.json 存在（安装脚本通常已生成，此处仅兜底）
+    if [ "$custom_dns_enabled" = true ] && [ "$core_xray" = true ]; then
+        if [[ ! -f /etc/N2X/dns.json ]]; then
+            cat <<'EOF' > /etc/N2X/dns.json
+{
+  "servers": [
+    "1.1.1.1",
+    "8.8.8.8"
+  ],
+  "tag": "dns_inbound"
+}
+EOF
+        fi
+    fi
+
+    # 生成 .env 模板（不覆盖已有文件）
+    if [[ ! -f /etc/N2X/.env.example ]]; then
+        cat <<'EOF' > /etc/N2X/.env.example
+# Copy to /etc/N2X/.env and fill your secrets.
+# chmod 600 /etc/N2X/.env
+
+# Panel
+N2X_API_HOST=https://example.com
+N2X_API_KEY=please_fill_me
+
+# Cert (used by lego when CertMode=dns/http/self)
+N2X_CERT_PROVIDER=cloudflare
+N2X_CERT_EMAIL=you@example.com
+
+# DNS provider env vars (example: Cloudflare)
+CF_API_KEY=
+CLOUDFLARE_EMAIL=
+EOF
+    fi
     
     # 创建 custom_outbound.json 文件
     cat <<EOF > /etc/N2X/custom_outbound.json
@@ -520,7 +567,8 @@ EOF
     echo -e "1. 检查 /etc/N2X/config.json 是否正确"
     echo -e "2. 若启用 sing 核心，确保 /etc/N2X/sing_origin.json 存在（缺失可再次 generate）"
     echo -e "3. 证书模式为 dns/http 时确认域名解析与 API 参数无误"
-    echo -e "4. 如有自定义 DNS/路由，可编辑 /etc/N2X/dns.json 与 /etc/N2X/route.json"
+    echo -e "4. 创建 /etc/N2X/.env（参考 /etc/N2X/.env.example），然后重启 N2X"
+    echo -e "5. 如有自定义 DNS/路由，可编辑 /etc/N2X/dns.json 与 /etc/N2X/route.json"
     echo -e "${yellow}正在重启 N2X 服务...${plain}"
     n2x restart
 }
