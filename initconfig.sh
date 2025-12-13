@@ -138,14 +138,14 @@ ${xray_dns_opts}            "EnableProxyProtocol": false,
             "CertConfig": {
                 "CertMode": "$certmode",
                 "RejectUnknownSni": false,
-                "CertDomain": "\${N2X_CERT_DOMAIN:-$certdomain}",
+                "CertDomain": "\${N2X_CERT_DOMAIN}",
                 "CertFile": "/etc/N2X/fullchain.cer",
                 "KeyFile": "/etc/N2X/cert.key",
-                "Email": "\${N2X_CERT_EMAIL:-}",
-                "Provider": "\${N2X_CERT_PROVIDER:-cloudflare}",
+                "Email": "\${N2X_CERT_EMAIL}",
+                "Provider": "\${N2X_CERT_PROVIDER}",
                 "DNSEnv": {
-                    "CF_API_KEY": "\${CF_API_KEY:-}",
-                    "CLOUDFLARE_EMAIL": "\${CLOUDFLARE_EMAIL:-}"
+                    "CF_API_KEY": "\${CF_API_KEY}",
+                    "CLOUDFLARE_EMAIL": "\${CLOUDFLARE_EMAIL}"
                 }
             }
         },
@@ -169,14 +169,14 @@ EOF
             "CertConfig": {
                 "CertMode": "$certmode",
                 "RejectUnknownSni": false,
-                "CertDomain": "\${N2X_CERT_DOMAIN:-$certdomain}",
+                "CertDomain": "\${N2X_CERT_DOMAIN}",
                 "CertFile": "/etc/N2X/fullchain.cer",
                 "KeyFile": "/etc/N2X/cert.key",
-                "Email": "\${N2X_CERT_EMAIL:-}",
-                "Provider": "\${N2X_CERT_PROVIDER:-cloudflare}",
+                "Email": "\${N2X_CERT_EMAIL}",
+                "Provider": "\${N2X_CERT_PROVIDER}",
                 "DNSEnv": {
-                    "CF_API_KEY": "\${CF_API_KEY:-}",
-                    "CLOUDFLARE_EMAIL": "\${CLOUDFLARE_EMAIL:-}"
+                    "CF_API_KEY": "\${CF_API_KEY}",
+                    "CLOUDFLARE_EMAIL": "\${CLOUDFLARE_EMAIL}"
                 }
             }
         },
@@ -199,14 +199,14 @@ EOF
             "CertConfig": {
                 "CertMode": "$certmode",
                 "RejectUnknownSni": false,
-                "CertDomain": "\${N2X_CERT_DOMAIN:-$certdomain}",
+                "CertDomain": "\${N2X_CERT_DOMAIN}",
                 "CertFile": "/etc/N2X/fullchain.cer",
                 "KeyFile": "/etc/N2X/cert.key",
-                "Email": "\${N2X_CERT_EMAIL:-}",
-                "Provider": "\${N2X_CERT_PROVIDER:-cloudflare}",
+                "Email": "\${N2X_CERT_EMAIL}",
+                "Provider": "\${N2X_CERT_PROVIDER}",
                 "DNSEnv": {
-                    "CF_API_KEY": "\${CF_API_KEY:-}",
-                    "CLOUDFLARE_EMAIL": "\${CLOUDFLARE_EMAIL:-}"
+                    "CF_API_KEY": "\${CF_API_KEY}",
+                    "CLOUDFLARE_EMAIL": "\${CLOUDFLARE_EMAIL}"
                 }
             }
         },
@@ -372,9 +372,9 @@ N2X_API_HOST=https://example.com
 N2X_API_KEY=please_fill_me
 
 # Cert (used by lego when CertMode=dns/http/self)
-N2X_CERT_DOMAIN=example.com
+N2X_CERT_DOMAIN=
 N2X_CERT_PROVIDER=cloudflare
-N2X_CERT_EMAIL=you@example.com
+N2X_CERT_EMAIL=
 
 # DNS provider env vars (example: Cloudflare)
 CF_API_KEY=

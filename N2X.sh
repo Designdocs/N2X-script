@@ -545,16 +545,16 @@ add_node_config() {
             "EnableTFO": true,
             "DNSType": "UseIPv4",
 	            "CertConfig": {
-	                "CertMode": "$certmode",
-	                "RejectUnknownSni": false,
-	                "CertDomain": "\${N2X_CERT_DOMAIN:-$certdomain}",
-	                "CertFile": "/etc/N2X/fullchain.cer",
-	                "KeyFile": "/etc/N2X/cert.key",
-	                "Email": "n2x@github.com",
-	                "Provider": "cloudflare",
-	                "DNSEnv": {
-                    "CF_API_KEY": "\${CF_API_KEY:-}",
-                    "CLOUDFLARE_EMAIL": "\${CLOUDFLARE_EMAIL:-}"
+                "CertMode": "$certmode",
+                "RejectUnknownSni": false,
+	                "CertDomain": "\${N2X_CERT_DOMAIN}",
+                "CertFile": "/etc/N2X/fullchain.cer",
+                "KeyFile": "/etc/N2X/cert.key",
+                "Email": "n2x@github.com",
+                "Provider": "cloudflare",
+                "DNSEnv": {
+                    "CF_API_KEY": "\${CF_API_KEY}",
+                    "CLOUDFLARE_EMAIL": "\${CLOUDFLARE_EMAIL}"
                 }
             }
         },
@@ -576,16 +576,16 @@ EOF
             "TCPFastOpen": $fastopen,
             "SniffEnabled": true,
 	            "CertConfig": {
-	                "CertMode": "$certmode",
-	                "RejectUnknownSni": false,
-	                "CertDomain": "\${N2X_CERT_DOMAIN:-$certdomain}",
-	                "CertFile": "/etc/N2X/fullchain.cer",
-	                "KeyFile": "/etc/N2X/cert.key",
-	                "Email": "n2x@github.com",
-	                "Provider": "cloudflare",
-	                "DNSEnv": {
-                    "CF_API_KEY": "\${CF_API_KEY:-}",
-                    "CLOUDFLARE_EMAIL": "\${CLOUDFLARE_EMAIL:-}"
+                "CertMode": "$certmode",
+                "RejectUnknownSni": false,
+	                "CertDomain": "\${N2X_CERT_DOMAIN}",
+                "CertFile": "/etc/N2X/fullchain.cer",
+                "KeyFile": "/etc/N2X/cert.key",
+                "Email": "n2x@github.com",
+                "Provider": "cloudflare",
+                "DNSEnv": {
+                    "CF_API_KEY": "\${CF_API_KEY}",
+                    "CLOUDFLARE_EMAIL": "\${CLOUDFLARE_EMAIL}"
                 }
             }
         },
@@ -606,16 +606,16 @@ EOF
             "DeviceOnlineMinTraffic": 200,
             "MinReportTraffic": 0,
 	            "CertConfig": {
-	                "CertMode": "$certmode",
-	                "RejectUnknownSni": false,
-	                "CertDomain": "\${N2X_CERT_DOMAIN:-$certdomain}",
-	                "CertFile": "/etc/N2X/fullchain.cer",
-	                "KeyFile": "/etc/N2X/cert.key",
-	                "Email": "n2x@github.com",
-	                "Provider": "cloudflare",
-	                "DNSEnv": {
-                    "CF_API_KEY": "\${CF_API_KEY:-}",
-                    "CLOUDFLARE_EMAIL": "\${CLOUDFLARE_EMAIL:-}"
+                "CertMode": "$certmode",
+                "RejectUnknownSni": false,
+	                "CertDomain": "\${N2X_CERT_DOMAIN}",
+                "CertFile": "/etc/N2X/fullchain.cer",
+                "KeyFile": "/etc/N2X/cert.key",
+                "Email": "n2x@github.com",
+                "Provider": "cloudflare",
+                "DNSEnv": {
+                    "CF_API_KEY": "\${CF_API_KEY}",
+                    "CLOUDFLARE_EMAIL": "\${CLOUDFLARE_EMAIL}"
                 }
             }
         },

@@ -7,12 +7,16 @@ Wants=network.target
 User=root
 Group=root
 Type=simple
+EnvironmentFile=-/etc/N2X/.env
+RuntimeDirectory=N2X
+RuntimeDirectoryMode=0755
 LimitAS=infinity
 LimitRSS=infinity
 LimitCORE=infinity
 LimitNOFILE=999999
 WorkingDirectory=/usr/local/N2X/
-ExecStart=/usr/local/N2X/N2X server
+ExecStartPre=/bin/sh -c 'envsubst < /etc/N2X/config.json > /run/N2X/config.json'
+ExecStart=/usr/local/N2X/N2X server --config /run/N2X/config.json
 Restart=always
 RestartSec=10
 
