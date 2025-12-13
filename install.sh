@@ -14,6 +14,17 @@ require_cmd() {
     command -v "$1" >/dev/null 2>&1 || die "缺少依赖命令: $1，请重试安装或手动安装。"
 }
 
+require_any_cmd() {
+    local a="$1" b="$2"
+    if command -v "$a" >/dev/null 2>&1; then
+        return 0
+    fi
+    if command -v "$b" >/dev/null 2>&1; then
+        return 0
+    fi
+    die "缺少依赖命令: $a 或 $b，请重试安装或手动安装。"
+}
+
 download_file() {
     local url="$1" out="$2"
     if command -v wget >/dev/null 2>&1; then
@@ -120,25 +131,39 @@ fi
 
 install_base() {
     if [[ x"${release}" == x"centos" ]]; then
-        yum install epel-release wget curl unzip tar crontabs socat ca-certificates gettext -y >/dev/null 2>&1
-        update-ca-trust force-enable >/dev/null 2>&1
+        yum install epel-release wget curl unzip tar crontabs socat ca-certificates gettext -y >/dev/null 2>&1 || die "yum 安装依赖失败"
+        update-ca-trust force-enable >/dev/null 2>&1 || true
     elif [[ x"${release}" == x"alpine" ]]; then
-        apk add wget curl unzip tar socat ca-certificates gettext >/dev/null 2>&1
-        update-ca-certificates >/dev/null 2>&1
+        apk add wget curl unzip tar socat ca-certificates gettext >/dev/null 2>&1 || die "apk 安装依赖失败"
+        update-ca-certificates >/dev/null 2>&1 || true
     elif [[ x"${release}" == x"debian" ]]; then
-        apt-get update -y >/dev/null 2>&1
-        apt install wget curl unzip tar cron socat ca-certificates gettext-base -y >/dev/null 2>&1
-        update-ca-certificates >/dev/null 2>&1
+        apt-get update -y >/dev/null 2>&1 || die "apt-get update 失败"
+        apt install wget curl unzip tar cron socat ca-certificates gettext-base -y >/dev/null 2>&1 || die "apt 安装依赖失败"
+        update-ca-certificates >/dev/null 2>&1 || true
     elif [[ x"${release}" == x"ubuntu" ]]; then
-        apt-get update -y >/dev/null 2>&1
-        apt install wget curl unzip tar cron socat gettext-base -y >/dev/null 2>&1
-        apt-get install ca-certificates wget -y >/dev/null 2>&1
-        update-ca-certificates >/dev/null 2>&1
+        apt-get update -y >/dev/null 2>&1 || die "apt-get update 失败"
+        apt install wget curl unzip tar cron socat gettext-base -y >/dev/null 2>&1 || die "apt 安装依赖失败"
+        apt-get install ca-certificates wget -y >/dev/null 2>&1 || true
+        update-ca-certificates >/dev/null 2>&1 || true
     elif [[ x"${release}" == x"arch" ]]; then
-        pacman -Sy --noconfirm >/dev/null 2>&1
-        pacman -S --noconfirm --needed wget curl unzip tar cron socat gettext >/dev/null 2>&1
-        pacman -S --noconfirm --needed ca-certificates wget >/dev/null 2>&1
+        pacman -Sy --noconfirm >/dev/null 2>&1 || die "pacman 更新失败"
+        pacman -S --noconfirm --needed wget curl unzip tar cron socat gettext >/dev/null 2>&1 || die "pacman 安装依赖失败"
+        pacman -S --noconfirm --needed ca-certificates wget >/dev/null 2>&1 || true
     fi
+}
+
+verify_dependencies() {
+    require_any_cmd curl wget
+    require_cmd unzip
+    require_cmd tar
+    require_cmd sed
+    require_cmd awk
+    require_cmd grep
+    if [[ x"${release}" != x"alpine" ]]; then
+        require_cmd systemctl
+        require_cmd journalctl
+    fi
+    require_cmd envsubst
 }
 
 # 0: running, 1: not running, 2: not installed
@@ -259,6 +284,9 @@ EnvironmentFile=-/etc/N2X/.env
 RuntimeDirectory=N2X
 RuntimeDirectoryMode=0755
 UMask=0077
+SyslogIdentifier=N2X
+StandardOutput=journal
+StandardError=journal
 LimitAS=infinity
 LimitRSS=infinity
 LimitCORE=infinity
@@ -306,8 +334,8 @@ EOF
         if [[ $? == 0 ]]; then
             log_info "N2X 重启成功"
         else
-            log_warn "N2X 可能启动失败，请使用 N2X log 查看日志，或运行：journalctl -u N2X -n 50 --no-pager"
-            log_warn "Wiki: https://github.com/Designdocs/N2X/wiki"
+            log_warn "N2X 可能启动失败，最近日志："
+            journalctl -u N2X -n 80 --no-pager || true
         fi
         first_install=false
     fi
@@ -370,6 +398,5 @@ EOF
 
 echo -e "${green}开始安装${plain}"
 install_base
-require_cmd curl
-require_cmd unzip
+verify_dependencies
 install_N2X $1
