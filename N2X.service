@@ -10,6 +10,7 @@ Type=simple
 EnvironmentFile=-/etc/N2X/.env
 RuntimeDirectory=N2X
 RuntimeDirectoryMode=0755
+UMask=0077
 LimitAS=infinity
 LimitRSS=infinity
 LimitCORE=infinity
@@ -17,10 +18,18 @@ LimitNOFILE=999999
 WorkingDirectory=/usr/local/N2X/
 ExecStartPre=/bin/sh -c 'test -n "$N2X_API_HOST" || { echo "N2X_API_HOST is empty"; exit 1; }'
 ExecStartPre=/bin/sh -c 'test -n "$N2X_API_KEY" || { echo "N2X_API_KEY is empty"; exit 1; }'
-ExecStartPre=/bin/sh -c 'envsubst < /etc/N2X/config.json > /run/N2X/config.json'
+ExecStartPre=/bin/sh -c 'command -v envsubst >/dev/null 2>&1 || { echo "envsubst not found"; exit 1; }'
+ExecStartPre=/bin/sh -c 'test -f /etc/N2X/config.json || { echo "/etc/N2X/config.json not found"; exit 1; }'
+ExecStartPre=/bin/sh -c 'envsubst '\''$N2X_API_HOST $N2X_API_KEY $N2X_CERT_DOMAIN $N2X_CERT_PROVIDER $N2X_CERT_EMAIL $CF_API_KEY $CLOUDFLARE_EMAIL'\'' < /etc/N2X/config.json > /run/N2X/config.json'
 ExecStart=/usr/local/N2X/N2X server --config /run/N2X/config.json
 Restart=always
 RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
 
 [Install]
 WantedBy=multi-user.target

@@ -163,6 +163,17 @@ check_status() {
     fi
 }
 
+fix_etc_n2x_permissions() {
+    mkdir -p /etc/N2X/ >/dev/null 2>&1 || true
+    chmod 700 /etc/N2X/ >/dev/null 2>&1 || true
+    if [[ -f /etc/N2X/config.json ]]; then
+        chmod 600 /etc/N2X/config.json >/dev/null 2>&1 || true
+    fi
+    if [[ -f /etc/N2X/.env ]]; then
+        chmod 600 /etc/N2X/.env >/dev/null 2>&1 || true
+    fi
+}
+
 install_N2X() {
     if [[ -e /usr/local/N2X/ ]]; then
         rm -rf /usr/local/N2X/
@@ -192,6 +203,7 @@ install_N2X() {
     rm N2X-linux.zip -f
     chmod +x N2X
     mkdir /etc/N2X/ -p
+    fix_etc_n2x_permissions
     # 旧配置迁移提示（仅在首次安装且检测到 V2bX 配置时）
     if [[ ! -f /etc/N2X/config.json && -f /etc/V2bX/config.json ]]; then
         echo -e "${yellow}检测到旧的 V2bX 配置，是否迁移到 N2X？${plain}"
@@ -246,6 +258,7 @@ Type=simple
 EnvironmentFile=-/etc/N2X/.env
 RuntimeDirectory=N2X
 RuntimeDirectoryMode=0755
+UMask=0077
 LimitAS=infinity
 LimitRSS=infinity
 LimitCORE=infinity
@@ -253,10 +266,18 @@ LimitNOFILE=999999
 WorkingDirectory=/usr/local/N2X/
 ExecStartPre=/bin/sh -c 'test -n "$N2X_API_HOST" || { echo "N2X_API_HOST is empty"; exit 1; }'
 ExecStartPre=/bin/sh -c 'test -n "$N2X_API_KEY" || { echo "N2X_API_KEY is empty"; exit 1; }'
-ExecStartPre=/bin/sh -c 'envsubst < /etc/N2X/config.json > /run/N2X/config.json'
+ExecStartPre=/bin/sh -c 'command -v envsubst >/dev/null 2>&1 || { echo "envsubst not found"; exit 1; }'
+ExecStartPre=/bin/sh -c 'test -f /etc/N2X/config.json || { echo "/etc/N2X/config.json not found"; exit 1; }'
+ExecStartPre=/bin/sh -c 'envsubst '\''$N2X_API_HOST $N2X_API_KEY $N2X_CERT_DOMAIN $N2X_CERT_PROVIDER $N2X_CERT_EMAIL $CF_API_KEY $CLOUDFLARE_EMAIL'\'' < /etc/N2X/config.json > /run/N2X/config.json'
 ExecStart=/usr/local/N2X/N2X server --config /run/N2X/config.json
 Restart=always
 RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
 
 [Install]
 WantedBy=multi-user.target
@@ -269,6 +290,7 @@ EOF
 
     if [[ ! -f /etc/N2X/config.json ]]; then
         cp config.json /etc/N2X/ || true
+        fix_etc_n2x_permissions
         echo -e ""
         echo -e "全新安装，请先参看教程：https://github.com/Designdocs/N2X-script/wiki ，配置必要的内容"
         first_install=true
