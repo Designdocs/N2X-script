@@ -280,6 +280,15 @@ generate_config_file() {
             \"Level\": \"error\",
             \"ErrorPath\": \"/etc/N2X/error.log\"
         },
+        \"ConnectionConfig\": {
+            \"handshake\": 4,
+            \"connIdle\": 300,
+            \"uplinkOnly\": 2,
+            \"downlinkOnly\": 5,
+            \"statsUserUplink\": false,
+            \"statsUserDownlink\": false,
+            \"bufferSize\": 64
+        },
 ${xray_dns_config_line}
         \"OutboundConfigPath\": \"/etc/N2X/custom_outbound.json\",
         \"RouteConfigPath\": \"/etc/N2X/route.json\"
@@ -296,7 +305,7 @@ ${xray_dns_config_line}
             \"Timestamp\": true
         },
         \"NTP\": {
-            \"Enable\": false,
+            \"Enable\": true,
             \"Server\": \"time.apple.com\",
             \"ServerPort\": 0
         },
