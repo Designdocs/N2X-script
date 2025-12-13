@@ -233,9 +233,6 @@ generate_config_file() {
         echo -e "${yellow}提示：检测到旧目录 /etc/V2bX，本向导生成的新配置会使用 /etc/N2X 路径。${plain}"
     fi
 
-    echo -e "${yellow}提示：本向导会在 config.json 中使用环境变量占位符（例如 \\${N2X_API_KEY}），${plain}"
-    echo -e "${yellow}      请自行创建 /etc/N2X/.env（参考 /etc/N2X/.env.example）写入真实值。${plain}"
-    
     nodes_config=()
     first_node=true
     core_xray=false
@@ -361,22 +358,13 @@ EOF
         fi
     fi
 
-    # 生成 .env 模板（不覆盖已有文件）
     if [[ ! -f /etc/N2X/.env.example ]]; then
         cat <<'EOF' > /etc/N2X/.env.example
-# Copy to /etc/N2X/.env and fill your secrets.
-# chmod 600 /etc/N2X/.env
-
-# Panel
 N2X_API_HOST=https://example.com
 N2X_API_KEY=please_fill_me
-
-# Cert (used by lego when CertMode=dns/http/self)
 N2X_CERT_DOMAIN=
 N2X_CERT_PROVIDER=cloudflare
 N2X_CERT_EMAIL=
-
-# DNS provider env vars (example: Cloudflare)
 CF_API_KEY=
 CLOUDFLARE_EMAIL=
 EOF
@@ -575,8 +563,7 @@ EOF
     echo -e "1. 检查 /etc/N2X/config.json 是否正确"
     echo -e "2. 若启用 sing 核心，确保 /etc/N2X/sing_origin.json 存在（缺失可再次 generate）"
     echo -e "3. 证书模式为 dns/http 时确认域名解析与 API 参数无误"
-    echo -e "4. 创建 /etc/N2X/.env（参考 /etc/N2X/.env.example），然后重启 N2X"
-    echo -e "5. 如有自定义 DNS/路由，可编辑 /etc/N2X/dns.json 与 /etc/N2X/route.json"
+    echo -e "4. 如有自定义 DNS/路由，可编辑 /etc/N2X/dns.json 与 /etc/N2X/route.json"
     echo -e "${yellow}正在重启 N2X 服务...${plain}"
     n2x restart
 }
