@@ -166,6 +166,15 @@ verify_dependencies() {
     require_cmd envsubst
 }
 
+ensure_cron_job() {
+    local spec="$1" cmd="$2"
+    local tmp
+    tmp="$(crontab -l 2>/dev/null || true)"
+    if ! printf "%s\n" "$tmp" | grep -Fq "$cmd"; then
+        printf "%s\n%s %s\n" "$tmp" "$spec" "$cmd" | crontab -
+    fi
+}
+
 # 0: running, 1: not running, 2: not installed
 check_status() {
     if [[ ! -f /usr/local/N2X/N2X ]]; then
@@ -352,6 +361,9 @@ EOF
     if [[ ! -f /etc/N2X/custom_inbound.json ]]; then
         cp custom_inbound.json /etc/N2X/
     fi
+    # Cron: daily geodata sync (04:00) and monthly update (1st 04:30)
+    ensure_cron_job "0 4 * * *" "/usr/bin/N2X update geodata -r >/var/log/N2X-geodata.log 2>&1"
+    ensure_cron_job "30 4 1 * *" "/usr/bin/N2X update -r >/var/log/N2X-update.log 2>&1"
     curl -o /usr/bin/N2X -Ls https://raw.githubusercontent.com/Designdocs/N2X-script/main/N2X.sh
     mkdir -p /usr/local/N2X/
     curl -o /usr/local/N2X/config_gen.sh -Ls https://raw.githubusercontent.com/Designdocs/N2X-script/main/config_gen.sh
