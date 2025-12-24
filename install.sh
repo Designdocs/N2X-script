@@ -361,8 +361,8 @@ EOF
     if [[ ! -f /etc/N2X/custom_inbound.json ]]; then
         cp custom_inbound.json /etc/N2X/
     fi
-    # Cron: daily geodata sync (04:00) and monthly update (1st 04:30)
-    ensure_cron_job "0 4 * * *" "/usr/bin/N2X update geodata -r >/var/log/N2X-geodata.log 2>&1"
+    # Cron: weekly geodata sync (Sat 04:00) and monthly update (1st 04:30)
+    ensure_cron_job "0 4 * * 6" "/usr/bin/N2X update geodata -r >/var/log/N2X-geodata.log 2>&1"
     ensure_cron_job "30 4 1 * *" "/usr/bin/N2X update -r >/var/log/N2X-update.log 2>&1"
     curl -o /usr/bin/N2X -Ls https://raw.githubusercontent.com/Designdocs/N2X-script/main/N2X.sh
     mkdir -p /usr/local/N2X/
