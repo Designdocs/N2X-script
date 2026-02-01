@@ -84,20 +84,77 @@ else
     echo -e "${red}未检测到系统版本，请联系脚本作者！${plain}\n" && exit 1
 fi
 
-arch=$(uname -m)
+detect_arch_candidates() {
+    local m
+    m="$(uname -m)"
+    case "$m" in
+        x86_64|x64|amd64)
+            echo "linux-64 linux-386"
+            ;;
+        aarch64|arm64)
+            echo "linux-arm64-v8a"
+            ;;
+        armv7*|armv8l)
+            echo "linux-arm32-v7a linux-arm32-v6 linux-arm32-v5"
+            ;;
+        armv6*|armv6l)
+            echo "linux-arm32-v6 linux-arm32-v5"
+            ;;
+        armv5*|armv5l)
+            echo "linux-arm32-v5"
+            ;;
+        mips64le)
+            echo "linux-mips64le"
+            ;;
+        mips64)
+            echo "linux-mips64"
+            ;;
+        mipsle)
+            echo "linux-mips32le linux-mips32le-softfloat"
+            ;;
+        mips*)
+            echo "linux-mips32 linux-mips32-softfloat"
+            ;;
+        ppc64le)
+            echo "linux-ppc64le"
+            ;;
+        ppc64)
+            echo "linux-ppc64"
+            ;;
+        riscv64)
+            echo "linux-riscv64"
+            ;;
+        s390x)
+            echo "linux-s390x"
+            ;;
+        *)
+            echo "linux-64 linux-386"
+            ;;
+    esac
+}
 
-if [[ $arch == "x86_64" || $arch == "x64" || $arch == "amd64" ]]; then
-    arch="64"
-elif [[ $arch == "aarch64" || $arch == "arm64" ]]; then
-    arch="arm64-v8a"
-elif [[ $arch == "s390x" ]]; then
-    arch="s390x"
-else
-    arch="64"
-    echo -e "${red}检测架构失败，使用默认架构: ${arch}${plain}"
-fi
+url_exists() {
+    local url="$1"
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsI --retry 2 --retry-delay 2 "$url" >/dev/null 2>&1
+        return $?
+    fi
+    wget --spider -q "$url" >/dev/null 2>&1
+}
 
-echo "架构: ${arch}"
+pick_asset_suffix() {
+    local version="$1"
+    local suffixes
+    suffixes=$(detect_arch_candidates)
+    for suf in $suffixes; do
+        local test_url="https://github.com/Designdocs/N2X/releases/download/${version}/N2X-${suf}.zip"
+        if url_exists "$test_url"; then
+            echo "$suf"
+            return 0
+        fi
+    done
+    return 1
+}
 
 if [ "$(getconf WORD_BIT)" != '32' ] && [ "$(getconf LONG_BIT)" != '64' ] ; then
     echo "本软件不支持 32 位系统(x86)，请使用 64 位系统(x86_64)，如果检测有误，请联系作者"
@@ -222,12 +279,16 @@ install_N2X() {
             die "检测 N2X 版本失败，可能是超出 Github API 限制，请稍后再试，或手动指定 N2X 版本安装"
         fi
         log_info "检测到 N2X 最新版本：${last_version}，开始安装"
-        url="https://github.com/Designdocs/N2X/releases/download/${last_version}/N2X-linux-${arch}.zip"
+        asset_suffix=$(pick_asset_suffix "$last_version") || die "当前架构无可用安装包，请检查发行页面：$last_version"
+        log_info "选择下载包: ${asset_suffix}"
+        url="https://github.com/Designdocs/N2X/releases/download/${last_version}/N2X-${asset_suffix}.zip"
         download_file "$url" /usr/local/N2X/N2X-linux.zip || die "下载 N2X 失败：$url"
         verify_sha256_if_possible "$url" /usr/local/N2X/N2X-linux.zip
     else
         last_version=$1
-        url="https://github.com/Designdocs/N2X/releases/download/${last_version}/N2X-linux-${arch}.zip"
+        asset_suffix=$(pick_asset_suffix "$last_version") || die "当前架构无可用安装包，请检查发行页面：$last_version"
+        log_info "选择下载包: ${asset_suffix}"
+        url="https://github.com/Designdocs/N2X/releases/download/${last_version}/N2X-${asset_suffix}.zip"
         log_info "开始安装 N2X $1"
         download_file "$url" /usr/local/N2X/N2X-linux.zip || die "下载 N2X $1 失败：$url"
         verify_sha256_if_possible "$url" /usr/local/N2X/N2X-linux.zip
