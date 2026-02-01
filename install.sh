@@ -274,25 +274,38 @@ ensure_env_file() {
         return
     fi
 
-    local input_host input_key
+    local input_host input_key input_cert_domain input_cert_provider input_cert_email input_cf_api_key input_cf_email
     while [[ -z "$input_host" ]]; do
         read -rp "请输入面板 API 地址 (N2X_API_HOST，例如 https://panel.example.com): " input_host
     done
     while [[ -z "$input_key" ]]; do
         read -rp "请输入面板 API KEY (N2X_API_KEY): " input_key
     done
+    read -rp "请输入证书域名 (N2X_CERT_DOMAIN，可留空，例如 all.cloudtls.top): " input_cert_domain
+    read -rp "请选择证书 DNS 提供商 (N2X_CERT_PROVIDER，默认 cloudflare): " input_cert_provider
+    input_cert_provider=${input_cert_provider:-cloudflare}
+    read -rp "请输入证书邮箱 (N2X_CERT_EMAIL，用于 ACME 注册，可留空): " input_cert_email
+    read -rp "请输入 Cloudflare Global API Key (CF_API_KEY，如使用 Cloudflare DNS，可留空): " input_cf_api_key
+    read -rp "请输入 Cloudflare 账号邮箱 (CLOUDFLARE_EMAIL，如使用 Cloudflare DNS，可留空): " input_cf_email
 
     cat <<EOF > /etc/N2X/.env
+# Panel API 配置
 N2X_API_HOST=${input_host}
 N2X_API_KEY=${input_key}
-N2X_CERT_DOMAIN=
-N2X_CERT_PROVIDER=cloudflare
-N2X_CERT_EMAIL=
-CF_API_KEY=
-CLOUDFLARE_EMAIL=
+
+# 证书申请：域名与 DNS 提供商
+N2X_CERT_DOMAIN=${input_cert_domain}
+# 证书 DNS Provider，默认 cloudflare
+N2X_CERT_PROVIDER=${input_cert_provider}
+# 用于 ACME 注册的邮箱
+N2X_CERT_EMAIL=${input_cert_email}
+
+# Cloudflare DNS API（使用 Cloudflare 申请证书时需要）
+CF_API_KEY=${input_cf_api_key}
+CLOUDFLARE_EMAIL=${input_cf_email}
 EOF
     chmod 600 /etc/N2X/.env >/dev/null 2>&1 || true
-    log_info "已生成 /etc/N2X/.env，必要的 API 变量已写入，请按需补全证书相关参数。"
+    log_info "已生成 /etc/N2X/.env，API 与证书相关变量已写入，可随时编辑补充。"
 }
 
 # 检查是否具备启动所需的最小 env；否则跳过启动，避免循环失败
