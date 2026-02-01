@@ -265,6 +265,51 @@ fix_etc_n2x_permissions() {
     fi
 }
 
+# Ensure required env vars exist for systemd before first启动
+ensure_env_file() {
+    mkdir -p /etc/N2X/ >/dev/null 2>&1 || true
+    # 已存在则保持用户设置
+    if [[ -f /etc/N2X/.env ]]; then
+        chmod 600 /etc/N2X/.env >/dev/null 2>&1 || true
+        return
+    fi
+
+    local input_host input_key
+    while [[ -z "$input_host" ]]; do
+        read -rp "请输入面板 API 地址 (N2X_API_HOST，例如 https://panel.example.com): " input_host
+    done
+    while [[ -z "$input_key" ]]; do
+        read -rp "请输入面板 API KEY (N2X_API_KEY): " input_key
+    done
+
+    cat <<EOF > /etc/N2X/.env
+N2X_API_HOST=${input_host}
+N2X_API_KEY=${input_key}
+N2X_CERT_DOMAIN=
+N2X_CERT_PROVIDER=cloudflare
+N2X_CERT_EMAIL=
+CF_API_KEY=
+CLOUDFLARE_EMAIL=
+EOF
+    chmod 600 /etc/N2X/.env >/dev/null 2>&1 || true
+    log_info "已生成 /etc/N2X/.env，必要的 API 变量已写入，请按需补全证书相关参数。"
+}
+
+# 检查是否具备启动所需的最小 env；否则跳过启动，避免循环失败
+env_ready_for_start() {
+    if [[ ! -f /etc/N2X/.env ]]; then
+        log_warn "/etc/N2X/.env 不存在，跳过启动，请先填写 N2X_API_HOST 与 N2X_API_KEY"
+        return 1
+    fi
+    # shellcheck disable=SC1091
+    set -a; source /etc/N2X/.env; set +a
+    if [[ -z "$N2X_API_HOST" || -z "$N2X_API_KEY" ]]; then
+        log_warn "N2X_API_HOST 或 N2X_API_KEY 为空，跳过启动，请编辑 /etc/N2X/.env"
+        return 1
+    fi
+    return 0
+}
+
 install_N2X() {
     if [[ -e /usr/local/N2X/ ]]; then
         rm -rf /usr/local/N2X/
@@ -316,6 +361,7 @@ install_N2X() {
     fi
     cp geoip.dat /etc/N2X/
     cp geosite.dat /etc/N2X/
+    ensure_env_file
     if [[ x"${release}" == x"alpine" ]]; then
         rm /etc/init.d/N2X -f
         cat <<EOF > /etc/init.d/N2X
@@ -393,19 +439,24 @@ EOF
         echo -e "全新安装，请先参看教程：https://github.com/Designdocs/N2X-script/wiki ，配置必要的内容"
         first_install=true
     else
-        if [[ x"${release}" == x"alpine" ]]; then
-            service N2X start
+        if env_ready_for_start; then
+            if [[ x"${release}" == x"alpine" ]]; then
+                service N2X start
+            else
+                systemctl start N2X
+            fi
+            sleep 2
+            check_status
+            echo -e ""
+            if [[ $? == 0 ]]; then
+                log_info "N2X 重启成功"
+            else
+                log_warn "N2X 可能启动失败，最近日志："
+                journalctl -u N2X -n 80 --no-pager || true
+            fi
         else
-            systemctl start N2X
-        fi
-        sleep 2
-        check_status
-        echo -e ""
-        if [[ $? == 0 ]]; then
-            log_info "N2X 重启成功"
-        else
-            log_warn "N2X 可能启动失败，最近日志："
-            journalctl -u N2X -n 80 --no-pager || true
+            echo -e ""
+            log_warn "因环境变量未完整，已跳过启动。请编辑 /etc/N2X/.env 后执行：systemctl restart N2X"
         fi
         first_install=false
     fi
