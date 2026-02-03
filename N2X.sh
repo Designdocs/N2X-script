@@ -547,14 +547,14 @@ add_node_config() {
 	            "CertConfig": {
                 "CertMode": "$certmode",
                 "RejectUnknownSni": false,
-	                "CertDomain": "\${N2X_CERT_DOMAIN}",
+	                "CertDomain": "all.example.com",
                 "CertFile": "/etc/N2X/fullchain.cer",
                 "KeyFile": "/etc/N2X/cert.key",
-                "Email": "n2x@github.com",
+                "Email": "example@gmail.com",
                 "Provider": "cloudflare",
                 "DNSEnv": {
-                    "CF_API_KEY": "\${CF_API_KEY}",
-                    "CLOUDFLARE_EMAIL": "\${CLOUDFLARE_EMAIL}"
+                    "CF_API_KEY": "ExampleKEY",
+                    "CLOUDFLARE_EMAIL": "example@gmail.com"
                 }
             }
         },
@@ -578,14 +578,14 @@ EOF
 	            "CertConfig": {
                 "CertMode": "$certmode",
                 "RejectUnknownSni": false,
-	                "CertDomain": "\${N2X_CERT_DOMAIN}",
+	                "CertDomain": "all.example.com",
                 "CertFile": "/etc/N2X/fullchain.cer",
                 "KeyFile": "/etc/N2X/cert.key",
-                "Email": "n2x@github.com",
+                "Email": "example@gmail.com",
                 "Provider": "cloudflare",
                 "DNSEnv": {
-                    "CF_API_KEY": "\${CF_API_KEY}",
-                    "CLOUDFLARE_EMAIL": "\${CLOUDFLARE_EMAIL}"
+                    "CF_API_KEY": "ExampleKEY",
+                    "CLOUDFLARE_EMAIL": "example@gmail.com"
                 }
             }
         },
@@ -608,14 +608,14 @@ EOF
 	            "CertConfig": {
                 "CertMode": "$certmode",
                 "RejectUnknownSni": false,
-	                "CertDomain": "\${N2X_CERT_DOMAIN}",
+	                "CertDomain": "all.example.com",
                 "CertFile": "/etc/N2X/fullchain.cer",
                 "KeyFile": "/etc/N2X/cert.key",
-                "Email": "n2x@github.com",
+                "Email": "example@gmail.com",
                 "Provider": "cloudflare",
                 "DNSEnv": {
-                    "CF_API_KEY": "\${CF_API_KEY}",
-                    "CLOUDFLARE_EMAIL": "\${CLOUDFLARE_EMAIL}"
+                    "CF_API_KEY": "ExampleKEY",
+                    "CLOUDFLARE_EMAIL": "example@gmail.com"
                 }
             }
         },

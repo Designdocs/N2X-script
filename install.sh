@@ -265,6 +265,142 @@ fix_etc_n2x_permissions() {
     fi
 }
 
+# Update ApiHost/ApiKey values inside config.json
+update_config_api_vars() {
+    local cfg="$1" host="$2" key="$3"
+    if command -v python3 >/dev/null 2>&1; then
+        if python3 - "$cfg" "$host" "$key" <<'PY'
+import json, sys
+path, host, key = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(path, "r", encoding="utf-8") as f:
+    data = json.load(f)
+nodes = data.get("Nodes")
+if isinstance(nodes, list):
+    for node in nodes:
+        if isinstance(node, dict):
+            if "ApiHost" in node:
+                node["ApiHost"] = host
+            if "ApiKey" in node:
+                node["ApiKey"] = key
+with open(path, "w", encoding="utf-8") as f:
+    json.dump(data, f, indent=2, ensure_ascii=True)
+    f.write("\n")
+PY
+        then
+            return 0
+        fi
+    fi
+    if command -v python >/dev/null 2>&1; then
+        if python - "$cfg" "$host" "$key" <<'PY'
+import json, sys
+path, host, key = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(path, "r") as f:
+    data = json.load(f)
+nodes = data.get("Nodes")
+if isinstance(nodes, list):
+    for node in nodes:
+        if isinstance(node, dict):
+            if "ApiHost" in node:
+                node["ApiHost"] = host
+            if "ApiKey" in node:
+                node["ApiKey"] = key
+with open(path, "w") as f:
+    json.dump(data, f, indent=2, ensure_ascii=True)
+    f.write("\n")
+PY
+        then
+            return 0
+        fi
+    fi
+    local esc_host esc_key
+    esc_host=$(printf '%s' "$host" | sed 's/[\\/&]/\\&/g')
+    esc_key=$(printf '%s' "$key" | sed 's/[\\/&]/\\&/g')
+    sed -i.bak -E "s#(\"ApiHost\"[[:space:]]*:[[:space:]]*)\"[^\"]*\"#\\1\"${esc_host}\"#g" "$cfg" || return 1
+    sed -i.bak -E "s#(\"ApiKey\"[[:space:]]*:[[:space:]]*)\"[^\"]*\"#\\1\"${esc_key}\"#g" "$cfg" || return 1
+    return 0
+}
+
+get_config_api_values() {
+    local cfg="$1"
+    if command -v python3 >/dev/null 2>&1; then
+        python3 - "$cfg" <<'PY'
+import json, sys
+path = sys.argv[1]
+try:
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+except Exception:
+    print("")
+    print("")
+    sys.exit(1)
+nodes = data.get("Nodes")
+host = ""
+key = ""
+if isinstance(nodes, list):
+    for node in nodes:
+        if isinstance(node, dict):
+            if not host:
+                host = str(node.get("ApiHost") or "")
+            if not key:
+                key = str(node.get("ApiKey") or "")
+            if host or key:
+                break
+print(host)
+print(key)
+PY
+        return
+    fi
+    if command -v python >/dev/null 2>&1; then
+        python - "$cfg" <<'PY'
+import json, sys
+path = sys.argv[1]
+try:
+    with open(path, "r") as f:
+        data = json.load(f)
+except Exception:
+    print("")
+    print("")
+    sys.exit(1)
+nodes = data.get("Nodes")
+host = ""
+key = ""
+if isinstance(nodes, list):
+    for node in nodes:
+        if isinstance(node, dict):
+            if not host:
+                host = str(node.get("ApiHost") or "")
+            if not key:
+                key = str(node.get("ApiKey") or "")
+            if host or key:
+                break
+print(host)
+print(key)
+PY
+        return
+    fi
+    local host key
+    host="$(grep -m1 -E '"ApiHost"' "$cfg" | sed -E 's/.*"ApiHost"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/')"
+    key="$(grep -m1 -E '"ApiKey"' "$cfg" | sed -E 's/.*"ApiKey"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/')"
+    printf "%s\n%s\n" "$host" "$key"
+}
+
+config_ready_for_start() {
+    local cfg="/etc/N2X/config.json"
+    [[ -f "$cfg" ]] || return 1
+    local host key
+    local -a cfg_values
+    mapfile -t cfg_values < <(get_config_api_values "$cfg")
+    host="${cfg_values[0]}"
+    key="${cfg_values[1]}"
+    if [[ -z "$host" || -z "$key" ]]; then
+        return 1
+    fi
+    if [[ "$host" == *'${N2X_API_HOST'* || "$key" == *'${N2X_API_KEY'* ]]; then
+        return 1
+    fi
+    return 0
+}
+
 # Ensure required env vars exist for systemd before first启动
 ensure_env_file() {
     mkdir -p /etc/N2X/ >/dev/null 2>&1 || true
@@ -274,50 +410,71 @@ ensure_env_file() {
         return
     fi
 
-    local input_host input_key input_cert_domain input_cert_provider input_cert_email input_cf_api_key input_cf_email
+    local create_env
+    read -rp "未检测到 /etc/N2X/.env，是否创建并填写该文件？[Y/n]: " create_env
+    create_env="${create_env:-Y}"
+    if [[ ! "$create_env" =~ ^[Yy]$ ]]; then
+        local input_host input_key
+        while [[ -z "$input_host" ]]; do
+            read -rp "请输入面板 API 地址 (N2X_API_HOST，例如 https://panel.example.com): " input_host
+        done
+        while [[ -z "$input_key" ]]; do
+            read -rp "请输入面板 API KEY (N2X_API_KEY): " input_key
+        done
+
+        if [[ ! -f /etc/N2X/config.json ]]; then
+            if [[ -f "${cur_dir}/config.json" ]]; then
+                cp "${cur_dir}/config.json" /etc/N2X/config.json || true
+            elif [[ -f "config.json" ]]; then
+                cp "config.json" /etc/N2X/config.json || true
+            fi
+        fi
+        if [[ ! -f /etc/N2X/config.json ]]; then
+            log_warn "未找到 /etc/N2X/config.json，无法写入 ApiHost/ApiKey，请稍后手动填写。"
+            return
+        fi
+        if update_config_api_vars "/etc/N2X/config.json" "$input_host" "$input_key"; then
+            fix_etc_n2x_permissions
+            log_info "已更新 /etc/N2X/config.json 的 ApiHost/ApiKey，未创建 .env。"
+        else
+            log_warn "更新 /etc/N2X/config.json 失败，请手动填写 ApiHost/ApiKey。"
+        fi
+        return
+    fi
+
+    local input_host input_key
     while [[ -z "$input_host" ]]; do
         read -rp "请输入面板 API 地址 (N2X_API_HOST，例如 https://panel.example.com): " input_host
     done
     while [[ -z "$input_key" ]]; do
         read -rp "请输入面板 API KEY (N2X_API_KEY): " input_key
     done
-    read -rp "请输入证书域名 (N2X_CERT_DOMAIN，可留空，例如 all.cloudtls.top): " input_cert_domain
-    read -rp "请选择证书 DNS 提供商 (N2X_CERT_PROVIDER，默认 cloudflare): " input_cert_provider
-    input_cert_provider=${input_cert_provider:-cloudflare}
-    read -rp "请输入证书邮箱 (N2X_CERT_EMAIL，用于 ACME 注册，可留空): " input_cert_email
-    read -rp "请输入 Cloudflare Global API Key (CF_API_KEY，如使用 Cloudflare DNS，可留空): " input_cf_api_key
-    read -rp "请输入 Cloudflare 账号邮箱 (CLOUDFLARE_EMAIL，如使用 Cloudflare DNS，可留空): " input_cf_email
 
     cat <<EOF > /etc/N2X/.env
 # Panel API 配置
 N2X_API_HOST=${input_host}
 N2X_API_KEY=${input_key}
-
-# 证书申请：域名与 DNS 提供商
-N2X_CERT_DOMAIN=${input_cert_domain}
-# 证书 DNS Provider，默认 cloudflare
-N2X_CERT_PROVIDER=${input_cert_provider}
-# 用于 ACME 注册的邮箱
-N2X_CERT_EMAIL=${input_cert_email}
-
-# Cloudflare DNS API（使用 Cloudflare 申请证书时需要）
-CF_API_KEY=${input_cf_api_key}
-CLOUDFLARE_EMAIL=${input_cf_email}
 EOF
     chmod 600 /etc/N2X/.env >/dev/null 2>&1 || true
-    log_info "已生成 /etc/N2X/.env，API 与证书相关变量已写入，可随时编辑补充。"
+    log_info "已生成 /etc/N2X/.env，API 相关变量已写入，可随时编辑补充。"
 }
 
 # 检查是否具备启动所需的最小 env；否则跳过启动，避免循环失败
 env_ready_for_start() {
     if [[ ! -f /etc/N2X/.env ]]; then
-        log_warn "/etc/N2X/.env 不存在，跳过启动，请先填写 N2X_API_HOST 与 N2X_API_KEY"
+        if config_ready_for_start; then
+            return 0
+        fi
+        log_warn "/etc/N2X/.env 不存在，且 /etc/N2X/config.json 未配置 ApiHost/ApiKey，跳过启动。"
         return 1
     fi
     # shellcheck disable=SC1091
     set -a; source /etc/N2X/.env; set +a
     if [[ -z "$N2X_API_HOST" || -z "$N2X_API_KEY" ]]; then
-        log_warn "N2X_API_HOST 或 N2X_API_KEY 为空，跳过启动，请编辑 /etc/N2X/.env"
+        if config_ready_for_start; then
+            return 0
+        fi
+        log_warn "N2X_API_HOST 或 N2X_API_KEY 为空，且 /etc/N2X/config.json 未配置 ApiHost/ApiKey，跳过启动。"
         return 1
     fi
     return 0
