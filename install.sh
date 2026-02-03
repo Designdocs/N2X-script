@@ -10,6 +10,168 @@ log_warn() { echo -e "${yellow}$*${plain}"; }
 log_error() { echo -e "${red}$*${plain}"; }
 die() { log_error "$*"; exit 1; }
 
+normalize_env_file() {
+    local env_path="$1"
+    [[ -f "$env_path" ]] || return 1
+
+    local tmp="${env_path}.tmp"
+    local changed=0
+
+    # Remove UTF-8 BOM if present
+    if head -c 3 "$env_path" | LC_ALL=C grep -q $'^\xEF\xBB\xBF'; then
+        tail -c +4 "$env_path" > "$tmp" && mv "$tmp" "$env_path"
+        changed=1
+        log_warn "检测到 BOM，已自动移除：$env_path"
+    fi
+
+    # Convert CRLF to LF
+    if LC_ALL=C grep -q $'\r' "$env_path"; then
+        tr -d '\r' < "$env_path" > "$tmp" && mv "$tmp" "$env_path"
+        changed=1
+        log_warn "检测到 CRLF，已自动转换为 LF：$env_path"
+    fi
+
+    if [[ "$changed" -eq 1 ]]; then
+        chmod 600 "$env_path" >/dev/null 2>&1 || true
+    fi
+    return 0
+}
+
+rewrite_env_file() {
+    local env_path="$1"
+    [[ -f "$env_path" ]] || return 1
+
+    normalize_env_file "$env_path" || return 1
+
+    local tmp="${env_path}.tmp"
+    local lineNo=0
+    local dropped=0
+    local changed=0
+
+    : > "$tmp"
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        lineNo=$((lineNo + 1))
+
+        local trimmed="$line"
+        trimmed="${trimmed#"${trimmed%%[![:space:]]*}"}"
+        trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+
+        if [[ -z "$trimmed" || "$trimmed" == \#* || "$trimmed" == \;* ]]; then
+            if [[ -n "$trimmed" ]]; then
+                changed=1
+            fi
+            continue
+        fi
+
+        if [[ "$trimmed" == export\ * ]]; then
+            trimmed="${trimmed#export }"
+            trimmed="${trimmed#"${trimmed%%[![:space:]]*}"}"
+            changed=1
+        fi
+
+        if [[ "$trimmed" != *=* ]]; then
+            log_warn "${env_path} 第 ${lineNo} 行缺少 '='，已忽略。"
+            dropped=1
+            changed=1
+            continue
+        fi
+
+        local key="${trimmed%%=*}"
+        local value="${trimmed#*=}"
+
+        key="${key#"${key%%[![:space:]]*}"}"
+        key="${key%"${key##*[![:space:]]}"}"
+        value="${value#"${value%%[![:space:]]*}"}"
+        value="${value%"${value##*[![:space:]]}"}"
+
+        if [[ ${#value} -ge 2 ]]; then
+            if [[ ( "${value:0:1}" == "\"" && "${value: -1}" == "\"" ) || ( "${value:0:1}" == "'" && "${value: -1}" == "'" ) ]]; then
+                value="${value:1:-1}"
+                changed=1
+            fi
+        fi
+
+        if [[ "$key" =~ [[:space:]] || "$value" =~ [[:space:]] ]]; then
+            key="${key//[[:space:]]/}"
+            value="${value//[[:space:]]/}"
+            changed=1
+        fi
+
+        if ! [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+            log_warn "${env_path} 第 ${lineNo} 行键名不合法，已忽略。"
+            dropped=1
+            changed=1
+            continue
+        fi
+
+        printf '%s=%s\n' "$key" "$value" >> "$tmp"
+    done < "$env_path"
+
+    if [[ ! -s "$tmp" ]]; then
+        rm -f "$tmp"
+        log_warn "${env_path} 清理后为空，请补充必要变量。"
+        return 1
+    fi
+
+    mv "$tmp" "$env_path"
+    chmod 600 "$env_path" >/dev/null 2>&1 || true
+
+    if [[ "$changed" -eq 1 ]]; then
+        log_warn "已自动规范化 ${env_path}（移除注释/空白/export/空格）。"
+    fi
+    if [[ "$dropped" -eq 1 ]]; then
+        log_warn "存在无法识别的行，已自动忽略。"
+    fi
+    return 0
+}
+
+validate_env_file() {
+    local env_path="$1"
+    [[ -f "$env_path" ]] || return 1
+
+    rewrite_env_file "$env_path" || return 1
+
+    local lineNo=0
+    local bad=0
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        lineNo=$((lineNo + 1))
+        local trimmed="$line"
+        trimmed="${trimmed#"${trimmed%%[![:space:]]*}"}"
+        trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+
+        if [[ -z "$trimmed" || "$trimmed" == \#* || "$trimmed" == \;* ]]; then
+            continue
+        fi
+        if ! [[ "$trimmed" =~ ^[A-Za-z_][A-Za-z0-9_]*=.*$ ]]; then
+            log_warn "${env_path} 第 ${lineNo} 行格式不正确，请使用 KEY=VALUE。"
+            bad=1
+            continue
+        fi
+        local key="${trimmed%%=*}"
+        if [[ "$key" =~ [[:space:]] ]]; then
+            log_warn "${env_path} 第 ${lineNo} 行键名包含空白字符。"
+            bad=1
+            continue
+        fi
+        if [[ "$trimmed" =~ [[:space:]] ]]; then
+            log_warn "${env_path} 第 ${lineNo} 行包含空白字符，请移除空格。"
+            bad=1
+            continue
+        fi
+        if LC_ALL=C printf '%s' "$line" | grep -q $'[^[:print:]\t]'; then
+            log_warn "${env_path} 第 ${lineNo} 行包含不可见字符，请重新输入。"
+            bad=1
+            continue
+        fi
+    done < "$env_path"
+
+    if [[ "$bad" -ne 0 ]]; then
+        log_warn "请修复 ${env_path} 后再启动 N2X（建议使用纯 ASCII 且 KEY=VALUE）。"
+        return 1
+    fi
+    return 0
+}
+
 require_cmd() {
     command -v "$1" >/dev/null 2>&1 || die "缺少依赖命令: $1，请重试安装或手动安装。"
 }
@@ -407,6 +569,7 @@ ensure_env_file() {
     # 已存在则保持用户设置
     if [[ -f /etc/N2X/.env ]]; then
         chmod 600 /etc/N2X/.env >/dev/null 2>&1 || true
+        validate_env_file /etc/N2X/.env || true
         return
     fi
 
@@ -456,6 +619,7 @@ N2X_API_HOST=${input_host}
 N2X_API_KEY=${input_key}
 EOF
     chmod 600 /etc/N2X/.env >/dev/null 2>&1 || true
+    validate_env_file /etc/N2X/.env || true
     log_info "已生成 /etc/N2X/.env，API 相关变量已写入，可随时编辑补充。"
 }
 
@@ -466,6 +630,10 @@ env_ready_for_start() {
             return 0
         fi
         log_warn "/etc/N2X/.env 不存在，且 /etc/N2X/config.json 未配置 ApiHost/ApiKey，跳过启动。"
+        return 1
+    fi
+    if ! validate_env_file /etc/N2X/.env; then
+        log_warn "/etc/N2X/.env 格式不正确，跳过启动。"
         return 1
     fi
     # shellcheck disable=SC1091
