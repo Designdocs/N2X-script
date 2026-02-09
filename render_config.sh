@@ -12,16 +12,86 @@ OUTPUT_PATH="${OUTPUT_PATH:-/run/N2X/config.json}"
 tmpdir="$(dirname "$OUTPUT_PATH")"
 mkdir -p "$tmpdir"
 
-# Load env file if present (may set baseline defaults)
-if [ -f "$ENV_PATH" ]; then
-  set -a
-  # shellcheck source=/dev/null
-  . "$ENV_PATH" || true
-  set +a
-fi
+trim_line() {
+  printf '%s' "$1" | sed -e 's/\r$//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+}
+
+strip_wrapping_quotes() {
+  value="$1"
+  case "$value" in
+    \"*\")
+      value="${value#\"}"
+      value="${value%\"}"
+      ;;
+    \'*\')
+      value="${value#\'}"
+      value="${value%\'}"
+      ;;
+  esac
+  printf '%s' "$value"
+}
+
+load_env_file() {
+  [ -f "$ENV_PATH" ] || return 0
+
+  while IFS= read -r raw_line || [ -n "$raw_line" ]; do
+    line="$(trim_line "$raw_line")"
+    [ -z "$line" ] && continue
+    case "$line" in
+      \#*|\;*)
+        continue
+        ;;
+      export\ *)
+        line="$(trim_line "${line#export }")"
+        ;;
+    esac
+    case "$line" in
+      *=*)
+        ;;
+      *)
+        continue
+        ;;
+    esac
+
+    key="$(trim_line "${line%%=*}")"
+    value="$(trim_line "${line#*=}")"
+    value="$(strip_wrapping_quotes "$value")"
+
+    case "$key" in
+      N2X_API_HOST|N2X_API_KEY|N2X_CERT_DOMAIN|N2X_CERT_PROVIDER|N2X_CERT_EMAIL|CF_API_KEY|CLOUDFLARE_EMAIL)
+        export "$key=$value"
+        ;;
+    esac
+  done < "$ENV_PATH"
+}
+
+load_env_file
 
 read_config_value() {
   # $1: logical key (ApiHost|ApiKey|CertDomain|CertProvider|CertEmail|CF_API_KEY|CLOUDFLARE_EMAIL)
+  if ! command -v python3 >/dev/null 2>&1; then
+    val=""
+    case "$1" in
+      ApiHost)
+        val="$(grep -m1 -E '"ApiHost"' "$CONFIG_PATH" | sed -E 's/.*"ApiHost"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/')"
+        ;;
+      ApiKey)
+        val="$(grep -m1 -E '"ApiKey"' "$CONFIG_PATH" | sed -E 's/.*"ApiKey"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/')"
+        ;;
+      *)
+        :
+        ;;
+    esac
+    case "$val" in
+      *'$'*)
+        ;;
+      *)
+        [ -n "$val" ] && printf '%s\n' "$val"
+        ;;
+    esac
+    return 0
+  fi
+
   python3 - "$CONFIG_PATH" "$1" <<'PY'
 import json, sys
 path, key = sys.argv[1], sys.argv[2]

@@ -4,6 +4,7 @@ red='\033[0;31m'
 green='\033[0;32m'
 yellow='\033[0;33m'
 plain='\033[0m'
+ENV_PATH="/etc/N2X/.env"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f "$SCRIPT_DIR/config_gen.sh" ]]; then
@@ -100,6 +101,215 @@ confirm_restart() {
 before_show_menu() {
     echo && echo -n -e "${yellow}按回车返回主菜单: ${plain}" && read temp
     show_menu
+}
+
+trim_text() {
+    local text="$1"
+    text="${text#"${text%%[![:space:]]*}"}"
+    text="${text%"${text##*[![:space:]]}"}"
+    printf '%s' "$text"
+}
+
+strip_wrapping_quotes() {
+    local value="$1"
+    if [[ ${#value} -ge 2 ]]; then
+        if [[ ( "${value:0:1}" == "\"" && "${value: -1}" == "\"" ) || ( "${value:0:1}" == "'" && "${value: -1}" == "'" ) ]]; then
+            value="${value:1:-1}"
+        fi
+    fi
+    printf '%s' "$value"
+}
+
+get_file_mode() {
+    local path="$1"
+    local mode=""
+    mode="$(stat -c '%a' "$path" 2>/dev/null || true)"
+    if [[ -z "$mode" ]]; then
+        mode="$(stat -f '%Lp' "$path" 2>/dev/null || true)"
+    fi
+    printf '%s' "$mode"
+}
+
+get_file_owner() {
+    local path="$1"
+    local owner=""
+    owner="$(stat -c '%U:%G' "$path" 2>/dev/null || true)"
+    if [[ -z "$owner" ]]; then
+        owner="$(stat -f '%Su:%Sg' "$path" 2>/dev/null || true)"
+    fi
+    printf '%s' "$owner"
+}
+
+is_permission_secure() {
+    local mode="$1"
+    [[ -n "$mode" ]] || return 1
+    if [[ ${#mode} -gt 3 ]]; then
+        mode="${mode: -3}"
+    fi
+    [[ "$mode" =~ ^[0-7]{3}$ ]] || return 1
+    local mode_oct=$((8#$mode))
+    # group/other 权限必须为 0
+    (( (mode_oct & 077) == 0 ))
+}
+
+create_env_file_interactive() {
+    mkdir -p /etc/N2X >/dev/null 2>&1 || true
+    chmod 700 /etc/N2X >/dev/null 2>&1 || true
+
+    local input_host=""
+    local input_key=""
+    while [[ -z "$input_host" ]]; do
+        read -rp "请输入面板 API 地址 (N2X_API_HOST，例如 https://panel.example.com): " input_host
+    done
+    while [[ -z "$input_key" ]]; do
+        read -rp "请输入面板 API KEY (N2X_API_KEY): " input_key
+    done
+
+    cat <<EOF > "$ENV_PATH"
+# Panel API 配置
+N2X_API_HOST=${input_host}
+N2X_API_KEY=${input_key}
+EOF
+    chmod 600 "$ENV_PATH" >/dev/null 2>&1 || true
+    echo -e "${green}已创建 ${ENV_PATH}${plain}"
+}
+
+validate_env_file_detailed() {
+    local env_path="$1"
+    local -a errors=()
+    local -a warnings=()
+    local line_no=0
+    local host_count=0
+    local key_count=0
+    local host_value=""
+    local key_value=""
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line_no=$((line_no + 1))
+        local trimmed
+        trimmed="$(trim_text "$line")"
+
+        if [[ -z "$trimmed" || "$trimmed" == \#* || "$trimmed" == \;* ]]; then
+            continue
+        fi
+        if [[ "$trimmed" == export\ * ]]; then
+            trimmed="$(trim_text "${trimmed#export }")"
+        fi
+        if [[ "$trimmed" != *=* ]]; then
+            errors+=("第 ${line_no} 行缺少 '='，应使用 KEY=VALUE 格式。")
+            continue
+        fi
+
+        local key value
+        key="$(trim_text "${trimmed%%=*}")"
+        value="$(trim_text "${trimmed#*=}")"
+
+        if [[ -z "$key" ]]; then
+            errors+=("第 ${line_no} 行键名为空。")
+            continue
+        fi
+        if ! [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+            errors+=("第 ${line_no} 行键名 '${key}' 非法（仅允许字母/数字/下划线，且不能以数字开头）。")
+            continue
+        fi
+
+        value="$(strip_wrapping_quotes "$value")"
+        case "$key" in
+            N2X_API_HOST)
+                host_count=$((host_count + 1))
+                host_value="$value"
+                if [[ -z "$value" ]]; then
+                    errors+=("第 ${line_no} 行 N2X_API_HOST 不能为空。")
+                fi
+                ;;
+            N2X_API_KEY)
+                key_count=$((key_count + 1))
+                key_value="$value"
+                if [[ -z "$value" ]]; then
+                    errors+=("第 ${line_no} 行 N2X_API_KEY 不能为空。")
+                fi
+                ;;
+        esac
+    done < "$env_path"
+
+    if [[ "$host_count" -eq 0 ]]; then
+        errors+=("缺少必填项 N2X_API_HOST。")
+    elif [[ "$host_count" -gt 1 ]]; then
+        warnings+=("N2X_API_HOST 出现 ${host_count} 次，将以最后一次为准。")
+    fi
+    if [[ "$key_count" -eq 0 ]]; then
+        errors+=("缺少必填项 N2X_API_KEY。")
+    elif [[ "$key_count" -gt 1 ]]; then
+        warnings+=("N2X_API_KEY 出现 ${key_count} 次，将以最后一次为准。")
+    fi
+
+    if [[ ${#warnings[@]} -gt 0 ]]; then
+        echo -e "${yellow}格式警告：${plain}"
+        for item in "${warnings[@]}"; do
+            echo -e "  - ${item}"
+        done
+    fi
+
+    if [[ ${#errors[@]} -gt 0 ]]; then
+        echo -e "${red}格式检测结果：不合格${plain}"
+        for item in "${errors[@]}"; do
+            echo -e "  - ${item}"
+        done
+        return 1
+    fi
+
+    if [[ -n "$host_value" && -n "$key_value" ]]; then
+        echo -e "${green}格式检测结果：合格${plain}"
+        echo "  - N2X_API_HOST: 已填写"
+        echo "  - N2X_API_KEY: 已填写"
+    fi
+    return 0
+}
+
+manage_env_file() {
+    echo -e "${yellow}N2X .env 管理${plain}"
+    echo "目标路径: ${ENV_PATH}"
+
+    if [[ ! -f "$ENV_PATH" ]]; then
+        echo -e "${yellow}检测结果：未找到 ${ENV_PATH}${plain}"
+        local create_env
+        read -rp "是否现在创建 ${ENV_PATH}？[Y/n]: " create_env
+        create_env="${create_env:-Y}"
+        if [[ "$create_env" =~ ^[Yy]$ ]]; then
+            create_env_file_interactive
+            echo -e "${yellow}已完成创建，建议再次执行 N2X env 查看检测结果。${plain}"
+        else
+            echo -e "${yellow}已跳过创建。${plain}"
+        fi
+        if [[ $# == 0 ]]; then
+            before_show_menu
+        fi
+        return
+    fi
+
+    local mode owner
+    mode="$(get_file_mode "$ENV_PATH")"
+    owner="$(get_file_owner "$ENV_PATH")"
+
+    echo -e "${green}检测结果：找到 .env 文件${plain}"
+    echo "文件路径: ${ENV_PATH}"
+    echo "文件属主: ${owner:-未知}"
+    if is_permission_secure "$mode"; then
+        echo -e "文件权限: ${mode:-未知} (合格，建议 600)"
+    else
+        echo -e "${red}文件权限: ${mode:-未知} (不合格，建议 chmod 600 ${ENV_PATH})${plain}"
+    fi
+
+    validate_env_file_detailed "$ENV_PATH"
+    if [[ $? -eq 0 ]]; then
+        echo -e "${green}.env 检测通过。${plain}"
+    else
+        echo -e "${yellow}请根据上方提示修复后再重试。${plain}"
+    fi
+
+    if [[ $# == 0 ]]; then
+        before_show_menu
+    fi
 }
 
 install() {
@@ -979,6 +1189,7 @@ show_usage() {
     echo "N2X enable       - 设置 N2X 开机自启"
     echo "N2X disable      - 取消 N2X 开机自启"
     echo "N2X log          - 查看 N2X 日志"
+    echo "N2X env          - 创建/检测 .env"
     echo "N2X x25519       - 生成 x25519 密钥"
     echo "N2X generate     - 生成 N2X 配置文件"
     echo "N2X update       - 更新 N2X"
@@ -1013,12 +1224,13 @@ show_menu() {
   ${green}13.${plain} 生成 X25519 密钥
   ${green}14.${plain} 升级 N2X 维护脚本
   ${green}15.${plain} 生成 N2X 配置文件
-  ${green}16.${plain} 放行 VPS 的所有网络端口
-  ${green}17.${plain} 退出脚本
+  ${green}16.${plain} 创建/检测 .env 文件
+  ${green}17.${plain} 放行 VPS 的所有网络端口
+  ${green}18.${plain} 退出脚本
  "
  #后续更新可加入上方字符串中
     show_status
-    echo && read -rp "请输入选择 [0-17]: " num
+    echo && read -rp "请输入选择 [0-18]: " num
 
     case "${num}" in
         0) config ;;
@@ -1037,9 +1249,10 @@ show_menu() {
         13) check_install && generate_x25519_key ;;
         14) update_shell ;;
         15) generate_config_file ;;
-        16) open_ports ;;
-        17) exit ;;
-        *) echo -e "${red}请输入正确的数字 [0-16]${plain}" ;;
+        16) manage_env_file ;;
+        17) open_ports ;;
+        18) exit ;;
+        *) echo -e "${red}请输入正确的数字 [0-18]${plain}" ;;
     esac
 }
 
@@ -1053,6 +1266,7 @@ if [[ $# > 0 ]]; then
         "enable") check_install 0 && enable 0 ;;
         "disable") check_install 0 && disable 0 ;;
         "log") check_install 0 && show_log 0 ;;
+        "env") manage_env_file 0 ;;
         "update") check_install 0 && update 0 $2 ;;
         "config") config $* ;;
         "generate") generate_config_file ;;

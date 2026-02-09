@@ -546,6 +546,65 @@ PY
     printf "%s\n%s\n" "$host" "$key"
 }
 
+strip_wrapping_quotes() {
+    local value="$1"
+    if [[ ${#value} -ge 2 ]]; then
+        if [[ ( "${value:0:1}" == "\"" && "${value: -1}" == "\"" ) || ( "${value:0:1}" == "'" && "${value: -1}" == "'" ) ]]; then
+            value="${value:1:-1}"
+        fi
+    fi
+    printf '%s' "$value"
+}
+
+get_env_api_values() {
+    local env_path="${1:-/etc/N2X/.env}"
+    if [[ ! -f "$env_path" ]]; then
+        printf "\n\n"
+        return
+    fi
+    if command -v python3 >/dev/null 2>&1; then
+        python3 - "$env_path" <<'PY'
+import sys
+path = sys.argv[1]
+host = ""
+key = ""
+try:
+    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+        for raw in f:
+            line = raw.strip()
+            if not line or line.startswith("#") or line.startswith(";"):
+                continue
+            if line.startswith("export "):
+                line = line[len("export "):].strip()
+            if "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            k = k.strip()
+            v = v.strip()
+            if len(v) >= 2 and ((v[0] == v[-1] == '"') or (v[0] == v[-1] == "'")):
+                v = v[1:-1]
+            if k == "N2X_API_HOST" and not host:
+                host = v
+            elif k == "N2X_API_KEY" and not key:
+                key = v
+            if host and key:
+                break
+except Exception:
+    pass
+print(host)
+print(key)
+PY
+        return
+    fi
+
+    local host key
+    host="$(grep -m1 -E '^[[:space:]]*(export[[:space:]]+)?N2X_API_HOST[[:space:]]*=' "$env_path" | sed -E 's/^[[:space:]]*(export[[:space:]]+)?N2X_API_HOST[[:space:]]*=[[:space:]]*//')"
+    key="$(grep -m1 -E '^[[:space:]]*(export[[:space:]]+)?N2X_API_KEY[[:space:]]*=' "$env_path" | sed -E 's/^[[:space:]]*(export[[:space:]]+)?N2X_API_KEY[[:space:]]*=[[:space:]]*//')"
+    host="$(strip_wrapping_quotes "$host")"
+    key="$(strip_wrapping_quotes "$key")"
+    printf "%s\n%s\n" "$host" "$key"
+}
+
 config_ready_for_start() {
     local cfg="/etc/N2X/config.json"
     [[ -f "$cfg" ]] || return 1
@@ -563,6 +622,22 @@ config_ready_for_start() {
     return 0
 }
 
+import_local_env_file() {
+    local source_env="$1"
+    local target_env="/etc/N2X/.env"
+
+    [[ -n "$source_env" && -f "$source_env" ]] || return 1
+
+    cp "$source_env" "$target_env" || return 1
+    chmod 600 "$target_env" >/dev/null 2>&1 || true
+    if ! validate_env_file "$target_env"; then
+        rm -f "$target_env"
+        return 1
+    fi
+    log_info "已从 ${source_env} 导入到 /etc/N2X/.env。"
+    return 0
+}
+
 # Ensure required env vars exist for systemd before first启动
 ensure_env_file() {
     mkdir -p /etc/N2X/ >/dev/null 2>&1 || true
@@ -573,35 +648,30 @@ ensure_env_file() {
         return
     fi
 
+    local local_env=""
+    if [[ -f "${cur_dir}/.env" ]]; then
+        local_env="${cur_dir}/.env"
+    elif [[ -f ".env" ]]; then
+        local_env=".env"
+    fi
+    if [[ -n "$local_env" ]]; then
+        local use_local_env
+        read -rp "检测到 ${local_env}，是否导入到 /etc/N2X/.env？[Y/n]: " use_local_env
+        use_local_env="${use_local_env:-Y}"
+        if [[ "$use_local_env" =~ ^[Yy]$ ]]; then
+            if import_local_env_file "$local_env"; then
+                return
+            fi
+            log_warn "导入 ${local_env} 失败，将继续手动创建 /etc/N2X/.env。"
+        fi
+    fi
+
     local create_env
     read -rp "未检测到 /etc/N2X/.env，是否创建并填写该文件？[Y/n]: " create_env
     create_env="${create_env:-Y}"
     if [[ ! "$create_env" =~ ^[Yy]$ ]]; then
-        local input_host input_key
-        while [[ -z "$input_host" ]]; do
-            read -rp "请输入面板 API 地址 (N2X_API_HOST，例如 https://panel.example.com): " input_host
-        done
-        while [[ -z "$input_key" ]]; do
-            read -rp "请输入面板 API KEY (N2X_API_KEY): " input_key
-        done
-
-        if [[ ! -f /etc/N2X/config.json ]]; then
-            if [[ -f "${cur_dir}/config.json" ]]; then
-                cp "${cur_dir}/config.json" /etc/N2X/config.json || true
-            elif [[ -f "config.json" ]]; then
-                cp "config.json" /etc/N2X/config.json || true
-            fi
-        fi
-        if [[ ! -f /etc/N2X/config.json ]]; then
-            log_warn "未找到 /etc/N2X/config.json，无法写入 ApiHost/ApiKey，请稍后手动填写。"
-            return
-        fi
-        if update_config_api_vars "/etc/N2X/config.json" "$input_host" "$input_key"; then
-            fix_etc_n2x_permissions
-            log_info "已更新 /etc/N2X/config.json 的 ApiHost/ApiKey，未创建 .env。"
-        else
-            log_warn "更新 /etc/N2X/config.json 失败，请手动填写 ApiHost/ApiKey。"
-        fi
+        log_warn "已跳过创建 /etc/N2X/.env。"
+        log_info "后续仍会继续首次安装流程，并提示是否运行 N2X 配置文件生成向导（用于填写 /etc/N2X/config.json 关键参数）。"
         return
     fi
 
@@ -636,9 +706,12 @@ env_ready_for_start() {
         log_warn "/etc/N2X/.env 格式不正确，跳过启动。"
         return 1
     fi
-    # shellcheck disable=SC1091
-    set -a; source /etc/N2X/.env; set +a
-    if [[ -z "$N2X_API_HOST" || -z "$N2X_API_KEY" ]]; then
+    local env_host env_key
+    local -a env_values
+    mapfile -t env_values < <(get_env_api_values /etc/N2X/.env)
+    env_host="${env_values[0]}"
+    env_key="${env_values[1]}"
+    if [[ -z "$env_host" || -z "$env_key" ]]; then
         if config_ready_for_start; then
             return 0
         fi
@@ -734,7 +807,6 @@ Wants=network.target
 User=root
 Group=root
 Type=simple
-EnvironmentFile=-/etc/N2X/.env
 RuntimeDirectory=N2X
 RuntimeDirectoryMode=0755
 UMask=0077
@@ -746,7 +818,7 @@ LimitRSS=infinity
 LimitCORE=infinity
 LimitNOFILE=999999
 WorkingDirectory=/usr/local/N2X/
-ExecStartPre=/bin/sh -c 'if [ -f /etc/N2X/.env ]; then test -n "$N2X_API_HOST" || { echo "N2X_API_HOST is empty"; exit 1; }; test -n "$N2X_API_KEY" || { echo "N2X_API_KEY is empty"; exit 1; }; command -v envsubst >/dev/null 2>&1 || { echo "envsubst not found"; exit 1; }; envsubst '\''$N2X_API_HOST $N2X_API_KEY $N2X_CERT_DOMAIN $N2X_CERT_PROVIDER $N2X_CERT_EMAIL $CF_API_KEY $CLOUDFLARE_EMAIL'\'' < /etc/N2X/config.json > /run/N2X/config.json; else cp /etc/N2X/config.json /run/N2X/config.json; fi'
+ExecStartPre=/bin/sh /usr/local/N2X/render_config.sh
 ExecStart=/usr/local/N2X/N2X server --config /run/N2X/config.json
 Restart=always
 RestartSec=10
@@ -790,7 +862,7 @@ EOF
             fi
         else
             echo -e ""
-            log_warn "因环境变量未完整，已跳过启动。请编辑 /etc/N2X/.env 后执行：systemctl restart N2X"
+            log_warn "因参数未完整，已跳过启动。请创建并填写 /etc/N2X/.env，或在 /etc/N2X/config.json 中填写 ApiHost/ApiKey 后执行：N2X restart"
         fi
         first_install=false
     fi
@@ -813,7 +885,9 @@ EOF
     curl -o /usr/bin/N2X -Ls https://raw.githubusercontent.com/Designdocs/N2X-script/main/N2X.sh
     mkdir -p /usr/local/N2X/
     curl -o /usr/local/N2X/config_gen.sh -Ls https://raw.githubusercontent.com/Designdocs/N2X-script/main/config_gen.sh
+    curl -o /usr/local/N2X/render_config.sh -Ls https://raw.githubusercontent.com/Designdocs/N2X-script/main/render_config.sh
     chmod +x /usr/bin/N2X
+    chmod +x /usr/local/N2X/render_config.sh >/dev/null 2>&1 || true
     if [ ! -L /usr/bin/n2x ]; then
         ln -s /usr/bin/N2X /usr/bin/n2x
         chmod +x /usr/bin/n2x
@@ -831,6 +905,7 @@ EOF
     echo "N2X enable       - 设置 N2X 开机自启"
     echo "N2X disable      - 取消 N2X 开机自启"
     echo "N2X log          - 查看 N2X 日志"
+    echo "N2X env          - 创建/检测 .env"
     echo "N2X x25519       - 生成 x25519 密钥"
     echo "N2X generate     - 生成 N2X 配置文件"
     echo "N2X update       - 更新 N2X"
