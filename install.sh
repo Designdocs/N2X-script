@@ -187,6 +187,301 @@ require_any_cmd() {
     die "缺少依赖命令: $a 或 $b，请重试安装或手动安装。"
 }
 
+apt_command() {
+    DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=3 -o Dpkg::Use-Pty=0 "$@"
+}
+
+apt_log_has_lock_error() {
+    local log_file="$1"
+    grep -Eqi "Could not get lock|Unable to acquire the dpkg frontend lock|is another process using it" "$log_file"
+}
+
+apt_log_has_release_error() {
+    local log_file="$1"
+    grep -Eqi "no longer has a Release file|does not have a Release file" "$log_file"
+}
+
+apt_log_has_dpkg_error() {
+    local log_file="$1"
+    grep -Eqi "dpkg was interrupted|you must manually run 'dpkg --configure -a'|unmet dependencies" "$log_file"
+}
+
+apt_log_has_network_error() {
+    local log_file="$1"
+    grep -Eqi "Temporary failure resolving|Could not resolve|Connection timed out|Connection failed|TLS handshake|Failed to fetch" "$log_file"
+}
+
+is_apt_process_running() {
+    pgrep -x apt >/dev/null 2>&1 \
+        || pgrep -x apt-get >/dev/null 2>&1 \
+        || pgrep -x dpkg >/dev/null 2>&1 \
+        || pgrep -f unattended-upgrade >/dev/null 2>&1
+}
+
+wait_for_apt_unlock() {
+    local timeout="${1:-60}"
+    local i
+    for ((i=0; i<timeout; i++)); do
+        if ! is_apt_process_running; then
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
+
+repair_apt_lock() {
+    local lock_files=(
+        /var/lib/dpkg/lock-frontend
+        /var/lib/dpkg/lock
+        /var/lib/apt/lists/lock
+        /var/cache/apt/archives/lock
+    )
+    log_warn "检测到 apt/dpkg 锁冲突，尝试自动修复..."
+    if wait_for_apt_unlock 90; then
+        log_info "apt/dpkg 锁已释放，继续执行。"
+        return 0
+    fi
+
+    if is_apt_process_running; then
+        log_warn "apt/dpkg 进程仍在运行，继续等待 30 秒。"
+        wait_for_apt_unlock 30 && return 0
+    fi
+
+    log_warn "未检测到活跃 apt/dpkg 进程，尝试清理残留锁文件。"
+    local lock_file
+    for lock_file in "${lock_files[@]}"; do
+        [[ -f "$lock_file" ]] && rm -f "$lock_file" >/dev/null 2>&1 || true
+    done
+    dpkg --configure -a >/dev/null 2>&1 || true
+    return 0
+}
+
+repair_dpkg_state() {
+    log_warn "检测到 dpkg/依赖状态异常，尝试自动修复..."
+    dpkg --configure -a >/dev/null 2>&1 || true
+    apt_command -f install -y >/dev/null 2>&1 || true
+}
+
+detect_os_codename() {
+    local codename=""
+    if [[ -f /etc/os-release ]]; then
+        codename="$(awk -F= '/^VERSION_CODENAME=/{gsub(/"/, "", $2); print $2}' /etc/os-release)"
+    fi
+    if [[ -z "$codename" && -f /etc/lsb-release ]]; then
+        codename="$(awk -F= '/^DISTRIB_CODENAME=/{print $2}' /etc/lsb-release)"
+    fi
+    if [[ -z "$codename" ]] && command -v lsb_release >/dev/null 2>&1; then
+        codename="$(lsb_release -cs 2>/dev/null || true)"
+    fi
+    printf '%s' "$codename"
+}
+
+backup_apt_sources_once() {
+    local backup_dir="/etc/apt/n2x-backup"
+    [[ -d "$backup_dir" ]] && return 0
+    mkdir -p "$backup_dir" >/dev/null 2>&1 || return 1
+    cp -a /etc/apt/sources.list "$backup_dir/sources.list" >/dev/null 2>&1 || true
+    if [[ -d /etc/apt/sources.list.d ]]; then
+        cp -a /etc/apt/sources.list.d "$backup_dir/sources.list.d" >/dev/null 2>&1 || true
+    fi
+    return 0
+}
+
+list_apt_source_files() {
+    if [[ -f /etc/apt/sources.list ]]; then
+        printf '%s\n' /etc/apt/sources.list
+    fi
+    local f
+    for f in /etc/apt/sources.list.d/*.list; do
+        [[ -f "$f" ]] && printf '%s\n' "$f"
+    done
+}
+
+comment_repo_lines() {
+    local url="$1"
+    local suite="$2"
+    local file="$3"
+    local tmp_file
+    local modified=0
+
+    [[ -f "$file" ]] || return 1
+    tmp_file="$(mktemp)"
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        local trimmed="$line"
+        trimmed="${trimmed#"${trimmed%%[![:space:]]*}"}"
+
+        if [[ "$trimmed" == \#* ]]; then
+            printf '%s\n' "$line" >> "$tmp_file"
+            continue
+        fi
+
+        if [[ "$trimmed" =~ ^deb(-src)?[[:space:]] ]] && [[ "$trimmed" == *"$url"* ]] && [[ "$trimmed" == *" ${suite}"* ]]; then
+            printf '# disabled-by-n2x-installer %s\n' "$line" >> "$tmp_file"
+            modified=1
+            continue
+        fi
+
+        printf '%s\n' "$line" >> "$tmp_file"
+    done < "$file"
+
+    if [[ "$modified" -eq 1 ]]; then
+        cp "$file" "${file}.n2x.bak.$(date +%s)" >/dev/null 2>&1 || true
+        mv "$tmp_file" "$file"
+        return 0
+    fi
+
+    rm -f "$tmp_file"
+    return 1
+}
+
+disable_invalid_repos_from_apt_log() {
+    local log_file="$1"
+    local changed=0
+    local line url suite src_file
+
+    while IFS= read -r line; do
+        url="$(printf '%s' "$line" | sed -n "s/^E: The repository '\\([^ ]*\\) [^ ]* Release'.*/\\1/p")"
+        suite="$(printf '%s' "$line" | sed -n "s/^E: The repository '[^ ]* \\([^ ]*\\) Release'.*/\\1/p")"
+        [[ -n "$url" && -n "$suite" ]] || continue
+
+        while IFS= read -r src_file; do
+            if comment_repo_lines "$url" "$suite" "$src_file"; then
+                changed=1
+                log_warn "已禁用失效软件源：$url $suite（文件：$src_file）"
+            fi
+        done < <(list_apt_source_files)
+    done < <(grep -E "no longer has a Release file|does not have a Release file" "$log_file" || true)
+
+    while IFS= read -r suite; do
+        [[ -n "$suite" ]] || continue
+        while IFS= read -r src_file; do
+            if comment_repo_lines "" "$suite" "$src_file"; then
+                changed=1
+                log_warn "已禁用疑似失效 backports 源：$suite（文件：$src_file）"
+            fi
+        done < <(list_apt_source_files)
+    done < <(grep -Eo '[a-z0-9.-]+-backports' "$log_file" | sort -u)
+
+    [[ "$changed" -eq 1 ]]
+}
+
+get_apt_mirror_candidates() {
+    if [[ x"${release}" == x"debian" ]]; then
+        echo "mirrors.aliyun.com mirrors.tuna.tsinghua.edu.cn mirrors.ustc.edu.cn"
+        return
+    fi
+    if [[ x"${release}" == x"ubuntu" ]]; then
+        echo "mirrors.aliyun.com mirrors.tuna.tsinghua.edu.cn mirrors.ustc.edu.cn"
+        return
+    fi
+    echo ""
+}
+
+switch_to_apt_mirror() {
+    local mirror_host="$1"
+    local codename components
+    codename="$(detect_os_codename)"
+    [[ -n "$codename" && -n "$mirror_host" ]] || return 1
+
+    backup_apt_sources_once || true
+
+    if [[ x"${release}" == x"debian" ]]; then
+        components="main contrib non-free"
+        case "$codename" in
+            bookworm|trixie|forky|sid)
+                components="${components} non-free-firmware"
+                ;;
+        esac
+        cat > /etc/apt/sources.list <<EOF
+deb http://${mirror_host}/debian ${codename} ${components}
+deb http://${mirror_host}/debian ${codename}-updates ${components}
+deb http://${mirror_host}/debian-security ${codename}-security ${components}
+EOF
+    elif [[ x"${release}" == x"ubuntu" ]]; then
+        cat > /etc/apt/sources.list <<EOF
+deb http://${mirror_host}/ubuntu ${codename} main restricted universe multiverse
+deb http://${mirror_host}/ubuntu ${codename}-updates main restricted universe multiverse
+deb http://${mirror_host}/ubuntu ${codename}-security main restricted universe multiverse
+deb http://${mirror_host}/ubuntu ${codename}-backports main restricted universe multiverse
+EOF
+    else
+        return 1
+    fi
+
+    log_warn "已切换 APT 镜像到 ${mirror_host}，原始配置已备份到 /etc/apt/n2x-backup"
+    return 0
+}
+
+run_apt_with_auto_repair() {
+    local action="$1"
+    shift
+    local attempt
+    local max_attempts=6
+    local mirror_index=0
+    local release_issue=0
+    local network_issue=0
+    local log_file
+    local -a mirror_candidates
+    log_file="$(mktemp /tmp/n2x-apt.XXXXXX.log)"
+    read -r -a mirror_candidates <<< "$(get_apt_mirror_candidates)"
+
+    for ((attempt=1; attempt<=max_attempts; attempt++)); do
+        if apt_command "$@" >"$log_file" 2>&1; then
+            rm -f "$log_file"
+            return 0
+        fi
+
+        log_warn "apt ${action} 失败（第 ${attempt}/${max_attempts} 次），开始自动诊断修复。"
+
+        if apt_log_has_lock_error "$log_file"; then
+            repair_apt_lock
+            continue
+        fi
+
+        release_issue=0
+        network_issue=0
+
+        if apt_log_has_release_error "$log_file"; then
+            release_issue=1
+            if disable_invalid_repos_from_apt_log "$log_file"; then
+                log_warn "已处理失效仓库条目，准备重试 apt ${action}。"
+                continue
+            fi
+        fi
+
+        if apt_log_has_dpkg_error "$log_file"; then
+            repair_dpkg_state
+            continue
+        fi
+
+        if apt_log_has_network_error "$log_file"; then
+            network_issue=1
+        fi
+
+        if [[ "$network_issue" -eq 1 || "$release_issue" -eq 1 ]] && [[ "$mirror_index" -lt "${#mirror_candidates[@]}" ]]; then
+            if switch_to_apt_mirror "${mirror_candidates[$mirror_index]}"; then
+                mirror_index=$((mirror_index + 1))
+                log_warn "已切换镜像，准备重试 apt ${action}。"
+                continue
+            fi
+            mirror_index=$((mirror_index + 1))
+        fi
+
+        if [[ "$attempt" -lt "$max_attempts" ]]; then
+            repair_dpkg_state >/dev/null 2>&1 || true
+            sleep 2
+            continue
+        fi
+    done
+
+    log_error "apt ${action} 仍然失败，最近错误输出："
+    tail -n 25 "$log_file" | sed 's/^/  /'
+    rm -f "$log_file"
+    return 1
+}
+
 download_file() {
     local url="$1" out="$2"
     if command -v wget >/dev/null 2>&1; then
@@ -356,13 +651,13 @@ install_base() {
         apk add wget curl unzip tar socat ca-certificates gettext >/dev/null 2>&1 || die "apk 安装依赖失败"
         update-ca-certificates >/dev/null 2>&1 || true
     elif [[ x"${release}" == x"debian" ]]; then
-        apt-get update -y >/dev/null 2>&1 || die "apt-get update 失败"
-        apt install wget curl unzip tar cron socat ca-certificates gettext-base -y >/dev/null 2>&1 || die "apt 安装依赖失败"
+        run_apt_with_auto_repair "update" update -y || die "apt-get update 失败"
+        run_apt_with_auto_repair "install dependencies" install wget curl unzip tar cron socat ca-certificates gettext-base -y || die "apt 安装依赖失败"
         update-ca-certificates >/dev/null 2>&1 || true
     elif [[ x"${release}" == x"ubuntu" ]]; then
-        apt-get update -y >/dev/null 2>&1 || die "apt-get update 失败"
-        apt install wget curl unzip tar cron socat gettext-base -y >/dev/null 2>&1 || die "apt 安装依赖失败"
-        apt-get install ca-certificates wget -y >/dev/null 2>&1 || true
+        run_apt_with_auto_repair "update" update -y || die "apt-get update 失败"
+        run_apt_with_auto_repair "install dependencies" install wget curl unzip tar cron socat gettext-base -y || die "apt 安装依赖失败"
+        run_apt_with_auto_repair "install certificates" install ca-certificates wget -y || true
         update-ca-certificates >/dev/null 2>&1 || true
     elif [[ x"${release}" == x"arch" ]]; then
         pacman -Sy --noconfirm >/dev/null 2>&1 || die "pacman 更新失败"
