@@ -4,6 +4,8 @@ red='\033[0;31m'
 green='\033[0;32m'
 yellow='\033[0;33m'
 plain='\033[0m'
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+INSTALL_BACKUP_DIR=""
 
 log_info() { echo -e "${green}$*${plain}"; }
 log_warn() { echo -e "${yellow}$*${plain}"; }
@@ -489,6 +491,93 @@ download_file() {
     else
         curl -fL --retry 3 --retry-delay 2 -o "$out" "$url"
     fi
+}
+
+install_file_from_local_or_remote() {
+    local local_name="$1" target_path="$2" remote_url="$3"
+
+    if [[ -f "${SCRIPT_DIR}/${local_name}" ]]; then
+        cp "${SCRIPT_DIR}/${local_name}" "$target_path" || return 1
+        return 0
+    fi
+
+    download_file "$remote_url" "$target_path"
+}
+
+install_support_scripts() {
+    mkdir -p /usr/local/N2X/ || return 1
+
+    install_file_from_local_or_remote \
+        "N2X.sh" \
+        "/usr/bin/N2X" \
+        "https://raw.githubusercontent.com/Designdocs/N2X-script/main/N2X.sh" || return 1
+
+    install_file_from_local_or_remote \
+        "config_gen.sh" \
+        "/usr/local/N2X/config_gen.sh" \
+        "https://raw.githubusercontent.com/Designdocs/N2X-script/main/config_gen.sh" || return 1
+
+    install_file_from_local_or_remote \
+        "render_config.sh" \
+        "/usr/local/N2X/render_config.sh" \
+        "https://raw.githubusercontent.com/Designdocs/N2X-script/main/render_config.sh" || return 1
+
+    chmod +x /usr/bin/N2X || return 1
+    chmod +x /usr/local/N2X/render_config.sh >/dev/null 2>&1 || return 1
+    chmod +x /usr/local/N2X/config_gen.sh >/dev/null 2>&1 || return 1
+    return 0
+}
+
+prepare_release_tree() {
+    local stage_dir="$1"
+
+    if [[ -f "${stage_dir}/V2bX" && ! -f "${stage_dir}/N2X" ]]; then
+        mv "${stage_dir}/V2bX" "${stage_dir}/N2X" || return 1
+    fi
+
+    [[ -f "${stage_dir}/N2X" ]] || return 1
+    chmod +x "${stage_dir}/N2X" || return 1
+    return 0
+}
+
+swap_installation_dir() {
+    local stage_dir="$1"
+    local install_dir="/usr/local/N2X"
+    local backup_dir=""
+
+    if [[ -d "$install_dir" ]]; then
+        backup_dir="/usr/local/N2X.backup.$(date +%s).$$"
+        mv "$install_dir" "$backup_dir" || return 1
+    fi
+
+    if mv "$stage_dir" "$install_dir"; then
+        INSTALL_BACKUP_DIR="$backup_dir"
+        return 0
+    fi
+
+    rm -rf "$install_dir" >/dev/null 2>&1 || true
+    if [[ -n "$backup_dir" && -d "$backup_dir" ]]; then
+        mv "$backup_dir" "$install_dir" >/dev/null 2>&1 || true
+    fi
+    return 1
+}
+
+restore_installation_backup() {
+    local install_dir="/usr/local/N2X"
+
+    [[ -n "$INSTALL_BACKUP_DIR" && -d "$INSTALL_BACKUP_DIR" ]] || return 0
+
+    rm -rf "$install_dir" >/dev/null 2>&1 || true
+    mv "$INSTALL_BACKUP_DIR" "$install_dir" >/dev/null 2>&1 || return 1
+    INSTALL_BACKUP_DIR=""
+    return 0
+}
+
+cleanup_installation_backup() {
+    if [[ -n "$INSTALL_BACKUP_DIR" && -d "$INSTALL_BACKUP_DIR" ]]; then
+        rm -rf "$INSTALL_BACKUP_DIR" >/dev/null 2>&1 || true
+    fi
+    INSTALL_BACKUP_DIR=""
 }
 
 verify_sha256_if_possible() {
@@ -1017,37 +1106,71 @@ env_ready_for_start() {
 }
 
 install_N2X() {
-    if [[ -e /usr/local/N2X/ ]]; then
-        rm -rf /usr/local/N2X/
-    fi
+    local staging_root=""
+    local extracted_dir=""
 
-    mkdir /usr/local/N2X/ -p
-    cd /usr/local/N2X/
+    staging_root="$(mktemp -d /tmp/n2x-install.XXXXXX)" || die "创建临时目录失败"
+    extracted_dir="${staging_root}/N2X"
+    mkdir -p "$extracted_dir" || die "创建解压目录失败"
+    cd "$staging_root" || die "切换到临时目录失败"
 
     if  [ $# == 0 ] ;then
         last_version=$(curl -Ls "https://api.github.com/repos/Designdocs/N2X/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
         if [[ ! -n "$last_version" ]]; then
+            rm -rf "$staging_root" >/dev/null 2>&1 || true
             die "检测 N2X 版本失败，可能是超出 Github API 限制，请稍后再试，或手动指定 N2X 版本安装"
         fi
         log_info "检测到 N2X 最新版本：${last_version}，开始安装"
         asset_suffix=$(pick_asset_suffix "$last_version") || die "当前架构无可用安装包，请检查发行页面：$last_version"
         log_info "选择下载包: ${asset_suffix}"
         url="https://github.com/Designdocs/N2X/releases/download/${last_version}/N2X-${asset_suffix}.zip"
-        download_file "$url" /usr/local/N2X/N2X-linux.zip || die "下载 N2X 失败：$url"
-        verify_sha256_if_possible "$url" /usr/local/N2X/N2X-linux.zip
+        download_file "$url" "${staging_root}/N2X-linux.zip" || {
+            rm -rf "$staging_root" >/dev/null 2>&1 || true
+            die "下载 N2X 失败：$url"
+        }
+        verify_sha256_if_possible "$url" "${staging_root}/N2X-linux.zip"
     else
         last_version=$1
         asset_suffix=$(pick_asset_suffix "$last_version") || die "当前架构无可用安装包，请检查发行页面：$last_version"
         log_info "选择下载包: ${asset_suffix}"
         url="https://github.com/Designdocs/N2X/releases/download/${last_version}/N2X-${asset_suffix}.zip"
         log_info "开始安装 N2X $1"
-        download_file "$url" /usr/local/N2X/N2X-linux.zip || die "下载 N2X $1 失败：$url"
-        verify_sha256_if_possible "$url" /usr/local/N2X/N2X-linux.zip
+        download_file "$url" "${staging_root}/N2X-linux.zip" || {
+            rm -rf "$staging_root" >/dev/null 2>&1 || true
+            die "下载 N2X $1 失败：$url"
+        }
+        verify_sha256_if_possible "$url" "${staging_root}/N2X-linux.zip"
     fi
 
-    unzip N2X-linux.zip
-    rm N2X-linux.zip -f
-    chmod +x N2X
+    unzip -q "${staging_root}/N2X-linux.zip" -d "$extracted_dir" || {
+        rm -rf "$staging_root" >/dev/null 2>&1 || true
+        die "解压 N2X 安装包失败"
+    }
+    rm -f "${staging_root}/N2X-linux.zip"
+    prepare_release_tree "$extracted_dir" || {
+        rm -rf "$staging_root" >/dev/null 2>&1 || true
+        die "安装包中未找到可执行文件 N2X"
+    }
+
+    if [[ x"${release}" == x"alpine" ]]; then
+        service N2X stop >/dev/null 2>&1 || true
+    else
+        systemctl stop N2X >/dev/null 2>&1 || true
+    fi
+
+    swap_installation_dir "$extracted_dir" || {
+        rm -rf "$staging_root" >/dev/null 2>&1 || true
+        die "替换 /usr/local/N2X 失败，已保留旧版本"
+    }
+    rm -rf "$staging_root" >/dev/null 2>&1 || true
+
+    if ! install_support_scripts; then
+        restore_installation_backup >/dev/null 2>&1 || true
+        die "安装管理脚本失败，请检查本地脚本目录或网络连接"
+    fi
+    cleanup_installation_backup
+
+    cd /usr/local/N2X/ || die "切换到安装目录失败"
     mkdir /etc/N2X/ -p
     fix_etc_n2x_permissions
     # 旧配置迁移提示（仅在首次安装且检测到 V2bX 配置时）
@@ -1177,12 +1300,6 @@ EOF
     # Cron: weekly geodata sync (Sat 04:00) and monthly update (1st 04:30)
     ensure_cron_job "0 4 * * 6" "/usr/bin/N2X update geodata -r >/var/log/N2X-geodata.log 2>&1"
     ensure_cron_job "30 4 1 * *" "/usr/bin/N2X update -r >/var/log/N2X-update.log 2>&1"
-    curl -o /usr/bin/N2X -Ls https://raw.githubusercontent.com/Designdocs/N2X-script/main/N2X.sh
-    mkdir -p /usr/local/N2X/
-    curl -o /usr/local/N2X/config_gen.sh -Ls https://raw.githubusercontent.com/Designdocs/N2X-script/main/config_gen.sh
-    curl -o /usr/local/N2X/render_config.sh -Ls https://raw.githubusercontent.com/Designdocs/N2X-script/main/render_config.sh
-    chmod +x /usr/bin/N2X
-    chmod +x /usr/local/N2X/render_config.sh >/dev/null 2>&1 || true
     if [ ! -L /usr/bin/n2x ]; then
         ln -s /usr/bin/N2X /usr/bin/n2x
         chmod +x /usr/bin/n2x
