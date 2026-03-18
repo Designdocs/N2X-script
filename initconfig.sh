@@ -118,13 +118,22 @@ add_node_config() {
             "DNSType": "UseIP",
 '
     fi
+    # 根据是否有 .env 决定 ApiHost/ApiKey 的值
+    if [ "$use_env_vars" = true ]; then
+        api_host_val='${N2X_API_HOST}'
+        api_key_val='${N2X_API_KEY}'
+    else
+        api_host_val="$config_api_host"
+        api_key_val="$config_api_key"
+    fi
+
     node_config=""
-    if [ "$core_type" == "1" ]; then 
+    if [ "$core_type" == "1" ]; then
     node_config=$(cat <<EOF
 {
             "Core": "$core",
-            "ApiHost": "\${N2X_API_HOST}",
-            "ApiKey": "\${N2X_API_KEY}",
+            "ApiHost": "$api_host_val",
+            "ApiKey": "$api_key_val",
             "NodeID": $NodeID,
             "NodeType": "$NodeType",
             "Timeout": 30,
@@ -155,8 +164,8 @@ EOF
     node_config=$(cat <<EOF
 {
             "Core": "$core",
-            "ApiHost": "\${N2X_API_HOST}",
-            "ApiKey": "\${N2X_API_KEY}",
+            "ApiHost": "$api_host_val",
+            "ApiKey": "$api_key_val",
             "NodeID": $NodeID,
             "NodeType": "$NodeType",
             "Timeout": 30,
@@ -186,8 +195,8 @@ EOF
     node_config=$(cat <<EOF
 {
             "Core": "$core",
-            "ApiHost": "\${N2X_API_HOST}",
-            "ApiKey": "\${N2X_API_KEY}",
+            "ApiHost": "$api_host_val",
+            "ApiKey": "$api_key_val",
             "NodeID": $NodeID,
             "NodeType": "$NodeType",
             "Hysteria2ConfigPath": "/etc/N2X/hy2config.yaml",
@@ -231,6 +240,23 @@ generate_config_file() {
 
     if [[ -d /etc/V2bX ]]; then
         echo -e "${yellow}提示：检测到旧目录 /etc/V2bX，本向导生成的新配置会使用 /etc/N2X 路径。${plain}"
+    fi
+
+    # 判断是否已有 .env 文件，若无则在向导中收集 ApiHost/ApiKey 直接写入 config
+    use_env_vars=true
+    config_api_host=""
+    config_api_key=""
+    if [[ ! -f /etc/N2X/.env ]]; then
+        echo -e "${yellow}未检测到 /etc/N2X/.env，将在配置文件中直接填写 ApiHost 和 ApiKey。${plain}"
+        use_env_vars=false
+        while [[ -z "$config_api_host" ]]; do
+            read -rp "请输入面板 API 地址 (ApiHost，例如 https://panel.example.com): " config_api_host
+        done
+        while [[ -z "$config_api_key" ]]; do
+            read -rp "请输入面板 API KEY (ApiKey): " config_api_key
+        done
+    else
+        echo -e "${green}已检测到 /etc/N2X/.env，ApiHost/ApiKey 将从环境变量读取。${plain}"
     fi
 
     nodes_config=()
