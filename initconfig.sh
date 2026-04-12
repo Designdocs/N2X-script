@@ -18,24 +18,10 @@ check_ipv6_support() {
 }
 
 add_node_config() {
-    echo -e "${green}请选择节点核心类型：${plain}"
-    echo -e "${green}1. xray${plain}"
-    echo -e "${green}2. singbox${plain}"
-    echo -e "${green}3. hysteria2${plain}"
-    read -rp "请输入：" core_type
-    if [ "$core_type" == "1" ]; then
-        core="xray"
-        core_xray=true
-    elif [ "$core_type" == "2" ]; then
-        core="sing"
-        core_sing=true
-    elif [ "$core_type" == "3" ]; then
-        core="hysteria2"
-        core_hysteria2=true
-    else
-        echo "无效的选择。请选择 1 2 3。"
-        continue
-    fi
+    core="xray"
+    core_xray=true
+    isreality=""
+    istls=""
     while true; do
         read -rp "请输入节点Node ID：" NodeID
         # 判断NodeID是否为正整数
@@ -46,43 +32,25 @@ add_node_config() {
         fi
     done
 
-    if [ "$core_hysteria2" = true ] && [ "$core_xray" = false ] && [ "$core_sing" = false ]; then
-        NodeType="hysteria2"
-    else
-        echo -e "${yellow}请选择节点传输协议：${plain}"
-        echo -e "${green}1. Shadowsocks${plain}"
-        echo -e "${green}2. Vless${plain}"
-        echo -e "${green}3. Vmess${plain}"
-        if [ "$core_sing" == true ]; then
-            echo -e "${green}4. Hysteria${plain}"
-            echo -e "${green}5. Hysteria2${plain}"
-        fi
-        if [ "$core_hysteria2" == true ] && [ "$core_sing" = false ]; then
-            echo -e "${green}5. Hysteria2${plain}"
-        fi
-        echo -e "${green}6. Trojan${plain}"  
-        if [ "$core_sing" == true ]; then
-            echo -e "${green}7. Tuic${plain}"
-            echo -e "${green}8. AnyTLS${plain}"
-        fi
-        read -rp "请输入：" NodeType
-        case "$NodeType" in
-            1 ) NodeType="shadowsocks" ;;
-            2 ) NodeType="vless" ;;
-            3 ) NodeType="vmess" ;;
-            4 ) NodeType="hysteria" ;;
-            5 ) NodeType="hysteria2" ;;
-            6 ) NodeType="trojan" ;;
-            7 ) NodeType="tuic" ;;
-            8 ) NodeType="anytls" ;;
-            * ) NodeType="shadowsocks" ;;
-        esac
-    fi
-    fastopen=true
+    echo -e "${yellow}请选择节点传输协议：${plain}"
+    echo -e "${green}1. Shadowsocks${plain}"
+    echo -e "${green}2. Vless${plain}"
+    echo -e "${green}3. Vmess${plain}"
+    echo -e "${green}4. Trojan${plain}"
+    echo -e "${green}5. AnyTLS${plain}"
+    read -rp "请输入：" NodeType
+    case "$NodeType" in
+        1 ) NodeType="shadowsocks" ;;
+        2 ) NodeType="vless" ;;
+        3 ) NodeType="vmess" ;;
+        4 ) NodeType="trojan" ;;
+        5 ) NodeType="anytls" ;;
+        * ) NodeType="shadowsocks" ;;
+    esac
     if [ "$NodeType" == "vless" ]; then
         read -rp "请选择是否为reality节点？(y/n)" isreality
-    elif [ "$NodeType" == "hysteria" ] || [ "$NodeType" == "hysteria2" ] || [ "$NodeType" == "tuic" ] || [ "$NodeType" == "anytls" ]; then
-        fastopen=false
+    fi
+    if [ "$NodeType" == "anytls" ]; then
         istls="y"
     fi
 
@@ -127,8 +95,6 @@ add_node_config() {
         api_key_val="$config_api_key"
     fi
 
-    node_config=""
-    if [ "$core_type" == "1" ]; then
     node_config=$(cat <<EOF
 {
             "Core": "$core",
@@ -160,68 +126,6 @@ ${xray_dns_opts}            "EnableProxyProtocol": false,
         },
 EOF
 )
-    elif [ "$core_type" == "2" ]; then
-    node_config=$(cat <<EOF
-{
-            "Core": "$core",
-            "ApiHost": "$api_host_val",
-            "ApiKey": "$api_key_val",
-            "NodeID": $NodeID,
-            "NodeType": "$NodeType",
-            "Timeout": 30,
-            "ListenIP": "$listen_ip",
-            "SendIP": "0.0.0.0",
-            "DeviceOnlineMinTraffic": 200,
-            "MinReportTraffic": 0,
-            "TCPFastOpen": $fastopen,
-            "SniffEnabled": true,
-            "CertConfig": {
-                "CertMode": "$certmode",
-                "RejectUnknownSni": false,
-                "CertDomain": "all.example.com",
-                "CertFile": "/etc/N2X/fullchain.cer",
-                "KeyFile": "/etc/N2X/cert.key",
-                "Email": "example@gmail.com",
-                "Provider": "cloudflare",
-                "DNSEnv": {
-                    "CF_API_KEY": "ExampleKEY",
-                    "CLOUDFLARE_EMAIL": "example@gmail.com"
-                }
-            }
-        },
-EOF
-)
-    elif [ "$core_type" == "3" ]; then
-    node_config=$(cat <<EOF
-{
-            "Core": "$core",
-            "ApiHost": "$api_host_val",
-            "ApiKey": "$api_key_val",
-            "NodeID": $NodeID,
-            "NodeType": "$NodeType",
-            "Hysteria2ConfigPath": "/etc/N2X/hy2config.yaml",
-            "Timeout": 30,
-            "ListenIP": "",
-            "SendIP": "0.0.0.0",
-            "DeviceOnlineMinTraffic": 200,
-            "MinReportTraffic": 0,
-            "CertConfig": {
-                "CertMode": "$certmode",
-                "RejectUnknownSni": false,
-                "CertDomain": "all.example.com",
-                "CertFile": "/etc/N2X/fullchain.cer",
-                "KeyFile": "/etc/N2X/cert.key",
-                "Email": "example@gmail.com",
-                "Provider": "cloudflare",
-                "DNSEnv": {
-                    "CF_API_KEY": "ExampleKEY",
-                    "CLOUDFLARE_EMAIL": "example@gmail.com"
-                }
-            }
-        },
-EOF
-)
-    fi
     nodes_config+=("$node_config")
 }
 
@@ -262,9 +166,6 @@ generate_config_file() {
     nodes_config=()
     first_node=true
     core_xray=false
-    core_sing=false
-    core_hysteria2=false
-
     read -rp "是否开启自定义 DNS（仅 xray 生效：DnsConfigPath=/etc/N2X/dns.json + xray 节点 EnableDNS/DNSType=UseIP）？(y/n) " enable_custom_dns
     if [[ "$enable_custom_dns" == "y" || "$enable_custom_dns" == "Y" ]]; then
         custom_dns_enabled=true
@@ -313,35 +214,6 @@ generate_config_file() {
 ${xray_dns_config_line}
         \"OutboundConfigPath\": \"/etc/N2X/custom_outbound.json\",
         \"RouteConfigPath\": \"/etc/N2X/route.json\"
-    },"
-    fi
-
-    # 检查并添加sing核心配置
-    if [ "$core_sing" = true ]; then
-        cores_config+="
-    {
-        \"Type\": \"sing\",
-        \"Log\": {
-            \"Level\": \"error\",
-            \"Timestamp\": true
-        },
-        \"NTP\": {
-            \"Enable\": true,
-            \"Server\": \"time.apple.com\",
-            \"ServerPort\": 0
-        },
-        \"OriginalPath\": \"/etc/N2X/sing_origin.json\"
-    },"
-    fi
-
-    # 检查并添加hysteria2核心配置
-    if [ "$core_hysteria2" = true ]; then
-        cores_config+="
-    {
-        \"Type\": \"hysteria2\",
-        \"Log\": {
-            \"Level\": \"error\"
-        }
     },"
     fi
 
@@ -476,115 +348,11 @@ EOF
     ]
 }
 EOF
-    ipv6_support=$(check_ipv6_support)
-    dnsstrategy="ipv4_only"
-    if [ "$ipv6_support" -eq 1 ]; then
-        dnsstrategy="prefer_ipv4"
-    fi
-    # 创建 sing_origin.json 文件
-    cat <<EOF > /etc/N2X/sing_origin.json
-{
-  "dns": {
-    "servers": [
-      {
-        "tag": "cf",
-        "address": "1.1.1.1"
-      }
-    ],
-    "strategy": "$dnsstrategy"
-  },
-  "outbounds": [
-    {
-      "tag": "direct",
-      "type": "direct",
-      "domain_resolver": {
-        "server": "cf",
-        "strategy": "$dnsstrategy"
-      }
-    },
-    {
-      "type": "block",
-      "tag": "block"
-    }
-  ],
-  "route": {
-    "rules": [
-      {
-        "ip_is_private": true,
-        "outbound": "block"
-      },
-      {
-        "domain_regex": [
-            "(api|ps|sv|offnavi|newvector|ulog.imap|newloc)(.map|).(baidu|n.shifen).com",
-            "(.+.|^)(360|so).(cn|com)",
-            "(Subject|HELO|SMTP)",
-            "(torrent|.torrent|peer_id=|info_hash|get_peers|find_node|BitTorrent|announce_peer|announce.php?passkey=)",
-            "(^.@)(guerrillamail|guerrillamailblock|sharklasers|grr|pokemail|spam4|bccto|chacuo|027168).(info|biz|com|de|net|org|me|la)",
-            "(.?)(xunlei|sandai|Thunder|XLLiveUD)(.)",
-            "(..||)(dafahao|mingjinglive|botanwang|minghui|dongtaiwang|falunaz|epochtimes|ntdtv|falundafa|falungong|wujieliulan|zhengjian).(org|com|net)",
-            "(ed2k|.torrent|peer_id=|announce|info_hash|get_peers|find_node|BitTorrent|announce_peer|announce.php?passkey=|magnet:|xunlei|sandai|Thunder|XLLiveUD|bt_key)",
-            "(.+.|^)(360).(cn|com|net)",
-            "(.*.||)(guanjia.qq.com|qqpcmgr|QQPCMGR)",
-            "(.*.||)(rising|kingsoft|duba|xindubawukong|jinshanduba).(com|net|org)",
-            "(.*.||)(netvigator|torproject).(com|cn|net|org)",
-            "(..||)(visa|mycard|gash|beanfun|bank).",
-            "(.*.||)(gov|12377|12315|talk.news.pts.org|creaders|zhuichaguoji|efcc.org|cyberpolice|aboluowang|tuidang|epochtimes|zhengjian|110.qq|mingjingnews|inmediahk|xinsheng|breakgfw|chengmingmag|jinpianwang|qi-gong|mhradio|edoors|renminbao|soundofhope|xizang-zhiye|bannedbook|ntdtv|12321|secretchina|dajiyuan|boxun|chinadigitaltimes|dwnews|huaglad|oneplusnews|epochweekly|cn.rfi).(cn|com|org|net|club|net|fr|tw|hk|eu|info|me)",
-            "(.*.||)(miaozhen|cnzz|talkingdata|umeng).(cn|com)",
-            "(.*.||)(mycard).(com|tw)",
-            "(.*.||)(gash).(com|tw)",
-            "(.bank.)",
-            "(.*.||)(pincong).(rocks)",
-            "(.*.||)(taobao).(com)",
-            "(.*.||)(laomoe|jiyou|ssss|lolicp|vv1234|0z|4321q|868123|ksweb|mm126).(com|cloud|fun|cn|gs|xyz|cc)",
-            "(flows|miaoko).(pages).(dev)"
-        ],
-        "outbound": "block"
-      },
-      {
-        "outbound": "direct",
-        "network": [
-          "udp","tcp"
-        ]
-      }
-    ]
-  },
-  "experimental": {
-    "cache_file": {
-      "enabled": true
-    }
-  }
-}
-EOF
-
-    # 创建 hy2config.yaml 文件           
-    cat <<EOF > /etc/N2X/hy2config.yaml
-quic:
-  initStreamReceiveWindow: 8388608
-  maxStreamReceiveWindow: 8388608
-  initConnReceiveWindow: 20971520
-  maxConnReceiveWindow: 20971520
-  maxIdleTimeout: 30s
-  maxIncomingStreams: 1024
-  disablePathMTUDiscovery: false
-ignoreClientBandwidth: false
-disableUDP: false
-udpIdleTimeout: 60s
-resolver:
-  type: system
-acl:
-  inline:
-    - direct(geosite:google)
-    - reject(geosite:cn)
-    - reject(geoip:cn)
-masquerade:
-  type: 404
-EOF
     echo -e "${green}N2X 配置文件生成完成${plain}"
     echo -e "${yellow}下一步建议：${plain}"
     echo -e "1. 检查 /etc/N2X/config.json 是否正确"
-    echo -e "2. 若启用 sing 核心，确保 /etc/N2X/sing_origin.json 存在（缺失可再次 generate）"
-    echo -e "3. 证书模式为 dns/http 时确认域名解析与 API 参数无误"
-    echo -e "4. 如有自定义 DNS/路由，可编辑 /etc/N2X/dns.json 与 /etc/N2X/route.json"
+    echo -e "2. 证书模式为 dns/http 时确认域名解析与 API 参数无误"
+    echo -e "3. 如有自定义 DNS/路由，可编辑 /etc/N2X/dns.json 与 /etc/N2X/route.json"
     echo -e "${yellow}正在重启 N2X 服务...${plain}"
     n2x restart
 }

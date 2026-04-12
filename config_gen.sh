@@ -15,24 +15,10 @@ check_ipv6_support() {
 
 # 节点配置生成
 add_node_config() {
-    echo -e "${green}请选择节点核心类型：${plain}"
-    echo -e "${green}1. xray${plain}"
-    echo -e "${green}2. singbox${plain}"
-    echo -e "${green}3. hysteria2${plain}"
-    read -rp "请输入：" core_type
-    if [ "$core_type" == "1" ]; then
-        core="xray"
-        core_xray=true
-    elif [ "$core_type" == "2" ]; then
-        core="sing"
-        core_sing=true
-    elif [ "$core_type" == "3" ]; then
-        core="hysteria2"
-        core_hysteria2=true
-    else
-        echo "无效的选择。请选择 1 2 3。"
-        continue
-    fi
+    core="xray"
+    core_xray=true
+    isreality=""
+    istls=""
     while true; do
         read -rp "请输入节点Node ID：" NodeID
         if [[ "$NodeID" =~ ^[0-9]+$ ]]; then
@@ -42,43 +28,25 @@ add_node_config() {
         fi
     done
 
-    if [ "$core_hysteria2" = true ] && [ "$core_xray" = false ] && [ "$core_sing" = false ]; then
-        NodeType="hysteria2"
-    else
-        echo -e "${yellow}请选择节点传输协议：${plain}"
-        echo -e "${green}1. Shadowsocks${plain}"
-        echo -e "${green}2. Vless${plain}"
-        echo -e "${green}3. Vmess${plain}"
-        if [ "$core_sing" == true ]; then
-            echo -e "${green}4. Hysteria${plain}"
-            echo -e "${green}5. Hysteria2${plain}"
-        fi
-        if [ "$core_hysteria2" == true ] && [ "$core_sing" = false ]; then
-            echo -e "${green}5. Hysteria2${plain}"
-        fi
-        echo -e "${green}6. Trojan${plain}"
-        if [ "$core_sing" == true ]; then
-            echo -e "${green}7. Tuic${plain}"
-            echo -e "${green}8. AnyTLS${plain}"
-        fi
-        read -rp "请输入：" NodeType
-        case "$NodeType" in
-            1 ) NodeType="shadowsocks" ;;
-            2 ) NodeType="vless" ;;
-            3 ) NodeType="vmess" ;;
-            4 ) NodeType="hysteria" ;;
-            5 ) NodeType="hysteria2" ;;
-            6 ) NodeType="trojan" ;;
-            7 ) NodeType="tuic" ;;
-            8 ) NodeType="anytls" ;;
-            * ) NodeType="shadowsocks" ;;
-        esac
-    fi
-    fastopen=true
+    echo -e "${yellow}请选择节点传输协议：${plain}"
+    echo -e "${green}1. Shadowsocks${plain}"
+    echo -e "${green}2. Vless${plain}"
+    echo -e "${green}3. Vmess${plain}"
+    echo -e "${green}4. Trojan${plain}"
+    echo -e "${green}5. AnyTLS${plain}"
+    read -rp "请输入：" NodeType
+    case "$NodeType" in
+        1 ) NodeType="shadowsocks" ;;
+        2 ) NodeType="vless" ;;
+        3 ) NodeType="vmess" ;;
+        4 ) NodeType="trojan" ;;
+        5 ) NodeType="anytls" ;;
+        * ) NodeType="shadowsocks" ;;
+    esac
     if [ "$NodeType" == "vless" ]; then
         read -rp "请选择是否为reality节点？(y/n)" isreality
-    elif [ "$NodeType" == "hysteria" ] || [ "$NodeType" == "hysteria2" ] || [ "$NodeType" == "tuic" ] || [ "$NodeType" == "anytls" ]; then
-        fastopen=false
+    fi
+    if [ "$NodeType" == "anytls" ]; then
         istls="y"
     fi
 
@@ -114,8 +82,6 @@ add_node_config() {
             "DNSType": "UseIP",
 '
     fi
-    node_config=""
-    if [ "$core_type" == "1" ]; then
     node_config=$(cat <<EOF
 {
             "Core": "$core",
@@ -147,68 +113,6 @@ ${xray_dns_opts}            "EnableProxyProtocol": false,
         },
 EOF
 )
-    elif [ "$core_type" == "2" ]; then
-    node_config=$(cat <<EOF
-{
-            "Core": "$core",
-            "ApiHost": "\${N2X_API_HOST}",
-            "ApiKey": "\${N2X_API_KEY}",
-            "NodeID": $NodeID,
-            "NodeType": "$NodeType",
-            "Timeout": 30,
-            "ListenIP": "$listen_ip",
-            "SendIP": "0.0.0.0",
-            "DeviceOnlineMinTraffic": 200,
-            "MinReportTraffic": 0,
-            "TCPFastOpen": $fastopen,
-            "SniffEnabled": true,
-            "CertConfig": {
-                "CertMode": "$certmode",
-                "RejectUnknownSni": false,
-                "CertDomain": "all.example.com",
-                "CertFile": "/etc/N2X/fullchain.cer",
-                "KeyFile": "/etc/N2X/cert.key",
-                "Email": "example@gmail.com",
-                "Provider": "cloudflare",
-                "DNSEnv": {
-                    "CF_API_KEY": "ExampleKEY",
-                    "CLOUDFLARE_EMAIL": "example@gmail.com"
-                }
-            }
-        },
-EOF
-)
-    elif [ "$core_type" == "3" ]; then
-    node_config=$(cat <<EOF
-{
-            "Core": "$core",
-            "ApiHost": "\${N2X_API_HOST}",
-            "ApiKey": "\${N2X_API_KEY}",
-            "NodeID": $NodeID,
-            "NodeType": "$NodeType",
-            "Hysteria2ConfigPath": "/etc/N2X/hy2config.yaml",
-            "Timeout": 30,
-            "ListenIP": "",
-            "SendIP": "0.0.0.0",
-            "DeviceOnlineMinTraffic": 200,
-            "MinReportTraffic": 0,
-            "CertConfig": {
-                "CertMode": "$certmode",
-                "RejectUnknownSni": false,
-                "CertDomain": "all.example.com",
-                "CertFile": "/etc/N2X/fullchain.cer",
-                "KeyFile": "/etc/N2X/cert.key",
-                "Email": "example@gmail.com",
-                "Provider": "cloudflare",
-                "DNSEnv": {
-                    "CF_API_KEY": "ExampleKEY",
-                    "CLOUDFLARE_EMAIL": "example@gmail.com"
-                }
-            }
-        },
-EOF
-)
-    fi
     nodes_config+=("$node_config")
 }
 
