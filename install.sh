@@ -1318,6 +1318,7 @@ EOF
     echo "N2X disable      - 取消 N2X 开机自启"
     echo "N2X log          - 查看 N2X 日志"
     echo "N2X env          - 创建/检测 .env"
+    echo "N2X caddy        - 管理 Caddy 443 分流"
     echo "N2X x25519       - 生成 x25519 密钥"
     echo "N2X generate     - 生成 N2X 配置文件"
     echo "N2X update       - 更新 N2X"

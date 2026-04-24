@@ -5,6 +5,12 @@ green='\033[0;32m'
 yellow='\033[0;33m'
 plain='\033[0m'
 ENV_PATH="/etc/N2X/.env"
+CADDY_SETTINGS_PATH="/etc/N2X/caddy/settings.env"
+CADDYFILE_PATH="/etc/caddy/Caddyfile"
+CADDY_DEFAULT_DOMAIN="all-hk.nom-loc.com"
+CADDY_DEFAULT_XHTTP_PATH="/api/v1/sync"
+CADDY_DEFAULT_BACKEND_HOST="127.0.0.1"
+CADDY_DEFAULT_BACKEND_PORT="9443"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f "$SCRIPT_DIR/config_gen.sh" ]]; then
@@ -310,6 +316,554 @@ manage_env_file() {
     if [[ $# == 0 ]]; then
         before_show_menu
     fi
+}
+
+caddy_slug_from_domain() {
+    local domain="$1"
+    local slug
+    slug="$(printf '%s' "$domain" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')"
+    if [[ -z "$slug" ]]; then
+        slug="n2x-caddy"
+    fi
+    printf '%s' "$slug"
+}
+
+caddy_region_from_domain() {
+    local domain="$1"
+    local label code
+    label="${domain%%.*}"
+    code="${label##*-}"
+    code="$(printf '%s' "$code" | tr '[:lower:]' '[:upper:]' | sed -E 's/[^A-Z]//g')"
+    if [[ ${#code} -lt 2 || ${#code} -gt 3 ]]; then
+        code="HK"
+    fi
+    printf '%s' "$code"
+}
+
+caddy_detect_region_code() {
+    local domain="$1"
+    local code=""
+    if command -v curl >/dev/null 2>&1; then
+        code="$(curl -fsS --max-time 3 https://ipinfo.io/country 2>/dev/null | head -n1 | tr '[:lower:]' '[:upper:]' | tr -cd 'A-Z' || true)"
+        if [[ -z "$code" ]]; then
+            code="$(curl -fsS --max-time 3 https://ifconfig.co/country-iso 2>/dev/null | head -n1 | tr '[:lower:]' '[:upper:]' | tr -cd 'A-Z' || true)"
+        fi
+    fi
+    if [[ ${#code} -lt 2 || ${#code} -gt 3 ]]; then
+        code="$(caddy_region_from_domain "$domain")"
+    fi
+    printf '%s' "$code"
+}
+
+caddy_normalize_domain() {
+    local domain="$1"
+    domain="${domain#http://}"
+    domain="${domain#https://}"
+    domain="${domain%%/*}"
+    domain="${domain%%:*}"
+    printf '%s' "$domain"
+}
+
+caddy_normalize_path() {
+    local path="$1"
+    [[ -n "$path" ]] || path="$CADDY_DEFAULT_XHTTP_PATH"
+    if [[ "$path" != /* ]]; then
+        path="/${path}"
+    fi
+    printf '%s' "$path"
+}
+
+caddy_prompt_with_default() {
+    local prompt="$1"
+    local default="$2"
+    local value=""
+    read -rp "${prompt} [默认: ${default}]: " value
+    value="${value:-$default}"
+    printf '%s' "$value"
+}
+
+caddy_escape_html() {
+    local value="$1"
+    value="${value//&/&amp;}"
+    value="${value//</&lt;}"
+    value="${value//>/&gt;}"
+    value="${value//\"/&quot;}"
+    printf '%s' "$value"
+}
+
+caddy_load_settings() {
+    DOMAIN="$CADDY_DEFAULT_DOMAIN"
+    XHTTP_PATH="$CADDY_DEFAULT_XHTTP_PATH"
+    BACKEND_HOST="$CADDY_DEFAULT_BACKEND_HOST"
+    BACKEND_PORT="$CADDY_DEFAULT_BACKEND_PORT"
+    WEB_ROOT="/var/www/$(caddy_slug_from_domain "$DOMAIN")"
+    ACCESS_LOG="/var/log/caddy/$(caddy_slug_from_domain "$DOMAIN")-access.log"
+    REGION_CODE="$(caddy_region_from_domain "$DOMAIN")"
+    SERVICE_TITLE="All ${REGION_CODE} Service"
+
+    if [[ -f "$CADDY_SETTINGS_PATH" ]]; then
+        # shellcheck disable=SC1090
+        source "$CADDY_SETTINGS_PATH"
+    fi
+}
+
+caddy_save_settings() {
+    mkdir -p "$(dirname "$CADDY_SETTINGS_PATH")"
+    {
+        printf 'DOMAIN=%q\n' "$DOMAIN"
+        printf 'XHTTP_PATH=%q\n' "$XHTTP_PATH"
+        printf 'BACKEND_HOST=%q\n' "$BACKEND_HOST"
+        printf 'BACKEND_PORT=%q\n' "$BACKEND_PORT"
+        printf 'WEB_ROOT=%q\n' "$WEB_ROOT"
+        printf 'ACCESS_LOG=%q\n' "$ACCESS_LOG"
+        printf 'REGION_CODE=%q\n' "$REGION_CODE"
+        printf 'SERVICE_TITLE=%q\n' "$SERVICE_TITLE"
+    } > "$CADDY_SETTINGS_PATH"
+    chmod 600 "$CADDY_SETTINGS_PATH" >/dev/null 2>&1 || true
+}
+
+caddy_package_installed() {
+    command -v caddy >/dev/null 2>&1
+}
+
+caddy_install_package() {
+    if caddy_package_installed; then
+        echo -e "${green}Caddy 已安装: $(caddy version 2>/dev/null || echo unknown)${plain}"
+        return 0
+    fi
+
+    echo -e "${yellow}未检测到 Caddy，开始安装...${plain}"
+    case "$release" in
+        debian|ubuntu)
+            apt-get update
+            apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl gpg ca-certificates
+            if ! curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/cfg/setup/bash.deb.sh' | bash; then
+                echo -e "${yellow}Cloudsmith 源配置失败，将尝试使用系统仓库安装 Caddy。${plain}"
+            fi
+            apt-get update
+            apt-get install -y caddy
+            ;;
+        centos)
+            if command -v dnf >/dev/null 2>&1; then
+                dnf install -y 'dnf-command(copr)' ca-certificates curl || dnf install -y dnf-plugins-core ca-certificates curl || true
+                dnf copr enable @caddy/caddy -y || true
+                dnf install -y caddy
+            else
+                yum install -y epel-release yum-plugin-copr ca-certificates curl || true
+                yum copr enable @caddy/caddy -y || true
+                yum install -y caddy
+            fi
+            ;;
+        alpine)
+            apk add --no-cache caddy curl ca-certificates
+            ;;
+        arch)
+            pacman -Sy --noconfirm --needed caddy curl ca-certificates
+            ;;
+        *)
+            echo -e "${red}当前系统暂未适配自动安装 Caddy，请手动安装后重试。${plain}"
+            return 1
+            ;;
+    esac
+
+    if ! caddy_package_installed; then
+        echo -e "${red}Caddy 安装失败，仍然找不到 caddy 命令。${plain}"
+        return 1
+    fi
+    echo -e "${green}Caddy 安装完成: $(caddy version 2>/dev/null || echo unknown)${plain}"
+}
+
+caddy_backup_caddyfile() {
+    if [[ -f "$CADDYFILE_PATH" ]]; then
+        local backup="${CADDYFILE_PATH}.bak.$(date +%Y%m%d-%H%M%S)"
+        cp "$CADDYFILE_PATH" "$backup"
+        echo -e "${green}已备份旧 Caddyfile: ${backup}${plain}"
+    fi
+}
+
+caddy_write_site_assets() {
+    echo -e "${yellow}创建网站目录: ${WEB_ROOT}${plain}"
+    mkdir -p "${WEB_ROOT}/assets"
+
+    local escaped_title
+    escaped_title="$(caddy_escape_html "$SERVICE_TITLE")"
+
+    cat > "${WEB_ROOT}/index.html" <<EOF
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>${escaped_title}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="${escaped_title} infrastructure and system status endpoint.">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+  <main class="status-shell">
+    <section class="status-panel" aria-label="Service status">
+      <p class="status-tag">System Endpoint · Operational</p>
+      <h1>${escaped_title}</h1>
+      <p class="status-copy">Reliable network service infrastructure, status endpoint, and secure connectivity interface.</p>
+      <footer class="status-footer">© 2026 ${escaped_title}</footer>
+    </section>
+  </main>
+</body>
+</html>
+EOF
+
+    cat > "${WEB_ROOT}/assets/site.css" <<'EOF'
+:root {
+  color-scheme: dark;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Arial, sans-serif;
+  background: #0e011d;
+  color: #f8f4ff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    linear-gradient(135deg, rgba(253, 211, 231, 0.2), rgba(109, 109, 208, 0.18), rgba(79, 193, 190, 0.12), rgba(14, 1, 29, 0.92)),
+    #0e011d;
+}
+
+.status-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+}
+
+.status-panel {
+  width: min(760px, 100%);
+  padding: clamp(32px, 7vw, 56px);
+  border: 1px solid rgba(253, 211, 231, 0.22);
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(18px);
+}
+
+.status-tag {
+  display: inline-flex;
+  align-items: center;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid rgba(253, 211, 231, 0.26);
+  border-radius: 999px;
+  background: rgba(253, 211, 231, 0.12);
+  color: #fdd3e7;
+  font-size: 14px;
+}
+
+h1 {
+  margin: 22px 0 14px;
+  font-size: clamp(36px, 6vw, 64px);
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.status-copy {
+  margin: 0;
+  max-width: 620px;
+  color: rgba(248, 244, 255, 0.72);
+  font-size: 18px;
+  line-height: 1.75;
+}
+
+.status-footer {
+  margin-top: 36px;
+  color: rgba(248, 244, 255, 0.48);
+  font-size: 14px;
+}
+EOF
+
+    cat > "${WEB_ROOT}/robots.txt" <<EOF
+User-agent: *
+Disallow:
+EOF
+    touch "${WEB_ROOT}/favicon.ico"
+}
+
+caddy_write_caddyfile() {
+    echo -e "${yellow}写入 Caddyfile: ${CADDYFILE_PATH}${plain}"
+    mkdir -p /etc/caddy /var/log/caddy
+
+    cat > "$CADDYFILE_PATH" <<EOF
+${DOMAIN} {
+    encode gzip zstd
+
+    log {
+        output file ${ACCESS_LOG}
+        format console
+    }
+
+    @xhttp path ${XHTTP_PATH}*
+    reverse_proxy @xhttp https://${BACKEND_HOST}:${BACKEND_PORT} {
+        header_up Host ${DOMAIN}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-Proto https
+
+        transport http {
+            tls_server_name ${DOMAIN}
+            tls_insecure_skip_verify
+            versions 2 1.1
+        }
+    }
+
+    root * ${WEB_ROOT}
+    file_server
+
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        X-Frame-Options "SAMEORIGIN"
+    }
+}
+EOF
+
+    caddy fmt --overwrite "$CADDYFILE_PATH" >/dev/null 2>&1 || true
+}
+
+caddy_check_ports() {
+    if ! command -v ss >/dev/null 2>&1; then
+        return 0
+    fi
+
+    echo -e "${yellow}当前端口占用：${plain}"
+    ss -lntp | grep -E ':443|:'"${BACKEND_PORT}" || true
+    if ss -lntp | grep ':443' | grep -v caddy >/dev/null 2>&1; then
+        echo -e "${yellow}443 当前可能被非 Caddy 进程占用。请确认 N2X 节点已监听到 ${BACKEND_PORT}。${plain}"
+    fi
+}
+
+caddy_validate_config() {
+    if ! caddy_package_installed; then
+        echo -e "${red}未检测到 caddy 命令，请先安装 Caddy。${plain}"
+        return 1
+    fi
+    caddy validate --config "$CADDYFILE_PATH"
+}
+
+caddy_restart_service() {
+    if [[ x"${release}" == x"alpine" ]]; then
+        rc-update add caddy default >/dev/null 2>&1 || true
+        service caddy restart
+    else
+        systemctl daemon-reload >/dev/null 2>&1 || true
+        systemctl enable caddy >/dev/null 2>&1 || true
+        systemctl restart caddy
+    fi
+}
+
+caddy_check_running() {
+    if [[ x"${release}" == x"alpine" ]]; then
+        service caddy status >/dev/null 2>&1
+    else
+        systemctl is-active --quiet caddy
+    fi
+}
+
+caddy_validate_and_restart() {
+    echo -e "${yellow}校验 Caddyfile...${plain}"
+    caddy_validate_config || return 1
+
+    echo -e "${yellow}重启 Caddy...${plain}"
+    caddy_restart_service || return 1
+    sleep 1
+    if ! caddy_check_running; then
+        caddy_status 0
+        echo -e "${red}Caddy 启动失败。${plain}"
+        return 1
+    fi
+    echo -e "${green}Caddy 已启动。${plain}"
+}
+
+caddy_show_result() {
+    echo
+    echo "================ Caddy 配置完成 ================"
+    echo "域名: ${DOMAIN}"
+    echo "网站根目录: ${WEB_ROOT}"
+    echo "XHTTP 路径: ${XHTTP_PATH}"
+    echo "后端地址: https://${BACKEND_HOST}:${BACKEND_PORT}"
+    echo "Caddyfile: ${CADDYFILE_PATH}"
+    echo "访问日志: ${ACCESS_LOG}"
+    echo
+    echo "------------- 测试命令 -------------"
+    echo "curl -I https://${DOMAIN}/"
+    echo "curl -Ik https://${DOMAIN}${XHTTP_PATH}"
+    echo "openssl s_client -connect ${DOMAIN}:443 -servername ${DOMAIN} -alpn h2"
+    echo "journalctl -u caddy -f"
+    echo "tail -f ${ACCESS_LOG}"
+    echo "================================================"
+}
+
+caddy_collect_settings() {
+    caddy_load_settings
+
+    local previous_domain
+    previous_domain="$DOMAIN"
+    DOMAIN="$(caddy_prompt_with_default "请输入 Caddy 绑定域名" "$DOMAIN")"
+    DOMAIN="$(caddy_normalize_domain "$DOMAIN")"
+    if [[ -z "$DOMAIN" ]]; then
+        DOMAIN="$CADDY_DEFAULT_DOMAIN"
+    fi
+
+    XHTTP_PATH="$(caddy_prompt_with_default "请输入分流路径" "$XHTTP_PATH")"
+    XHTTP_PATH="$(caddy_normalize_path "$XHTTP_PATH")"
+
+    BACKEND_HOST="$(caddy_prompt_with_default "请输入后端地址" "$BACKEND_HOST")"
+    BACKEND_PORT="$(caddy_prompt_with_default "请输入后端端口" "$BACKEND_PORT")"
+    while ! [[ "$BACKEND_PORT" =~ ^[0-9]+$ ]] || (( BACKEND_PORT < 1 || BACKEND_PORT > 65535 )); do
+        echo -e "${red}端口必须是 1-65535 的数字。${plain}"
+        BACKEND_PORT="$(caddy_prompt_with_default "请输入后端端口" "$CADDY_DEFAULT_BACKEND_PORT")"
+    done
+
+    local site_slug default_root detected_region default_title
+    site_slug="$(caddy_slug_from_domain "$DOMAIN")"
+    default_root="/var/www/${site_slug}"
+    if [[ -z "$WEB_ROOT" || "$WEB_ROOT" == "/var/www/$(caddy_slug_from_domain "$previous_domain")" ]]; then
+        WEB_ROOT="$default_root"
+    fi
+    WEB_ROOT="$(caddy_prompt_with_default "请输入网站根目录" "$WEB_ROOT")"
+
+    ACCESS_LOG="/var/log/caddy/${site_slug}-access.log"
+    detected_region="$(caddy_detect_region_code "$DOMAIN")"
+    REGION_CODE="$(caddy_prompt_with_default "请输入网页区域缩写" "$detected_region")"
+    REGION_CODE="$(printf '%s' "$REGION_CODE" | tr '[:lower:]' '[:upper:]' | tr -cd 'A-Z0-9')"
+    if [[ -z "$REGION_CODE" ]]; then
+        REGION_CODE="$detected_region"
+    fi
+    default_title="All ${REGION_CODE} Service"
+    SERVICE_TITLE="$(caddy_prompt_with_default "请输入网页标题" "$default_title")"
+}
+
+caddy_configure() {
+    caddy_collect_settings
+    caddy_save_settings
+    caddy_backup_caddyfile
+    caddy_write_site_assets
+    caddy_write_caddyfile
+    caddy_check_ports
+    if caddy_package_installed; then
+        caddy_validate_and_restart || return 1
+    else
+        echo -e "${yellow}配置已写入，但尚未安装 Caddy。请选择安装 Caddy 后自动启动。${plain}"
+    fi
+    caddy_show_result
+}
+
+caddy_install_and_configure() {
+    caddy_install_package || return 1
+    caddy_configure || return 1
+}
+
+caddy_uninstall() {
+    confirm "确定要卸载 Caddy 吗?" "n" || return 0
+
+    if [[ x"${release}" == x"alpine" ]]; then
+        service caddy stop >/dev/null 2>&1 || true
+        rc-update del caddy default >/dev/null 2>&1 || true
+        apk del caddy >/dev/null 2>&1 || true
+    else
+        systemctl stop caddy >/dev/null 2>&1 || true
+        systemctl disable caddy >/dev/null 2>&1 || true
+        if [[ x"${release}" == x"debian" || x"${release}" == x"ubuntu" ]]; then
+            apt-get remove -y caddy
+        elif [[ x"${release}" == x"arch" ]]; then
+            pacman -Rns --noconfirm caddy
+        else
+            if command -v dnf >/dev/null 2>&1; then
+                dnf remove -y caddy
+            else
+                yum remove -y caddy
+            fi
+        fi
+    fi
+
+    caddy_load_settings
+    if confirm "是否同时删除 N2X 生成的 Caddy 配置和网页目录?" "n"; then
+        rm -f "$CADDYFILE_PATH" "$CADDY_SETTINGS_PATH"
+        rm -rf "$WEB_ROOT"
+        echo -e "${green}已删除 Caddyfile、N2X Caddy 参数和网页目录。${plain}"
+    fi
+    echo -e "${green}Caddy 卸载流程完成。${plain}"
+}
+
+caddy_status() {
+    if ! caddy_package_installed; then
+        echo -e "${red}Caddy 未安装。${plain}"
+        return 1
+    fi
+    if [[ x"${release}" == x"alpine" ]]; then
+        service caddy status
+    else
+        systemctl status caddy --no-pager -l
+    fi
+}
+
+caddy_log() {
+    if [[ x"${release}" == x"alpine" ]]; then
+        caddy_load_settings
+        tail -f "$ACCESS_LOG"
+    else
+        journalctl -u caddy.service -e --no-pager -f
+    fi
+}
+
+before_caddy_menu() {
+    echo && echo -n -e "${yellow}按回车返回 Caddy 菜单: ${plain}" && read temp
+    caddy_menu
+}
+
+caddy_menu() {
+    echo -e "
+  ${green}Caddy 分流管理${plain}
+————————————————
+  ${green}1.${plain} 安装/重新配置 Caddy
+  ${green}2.${plain} 修改 Caddy 参数并重启
+  ${green}3.${plain} 重启 Caddy
+  ${green}4.${plain} 查看 Caddy 状态
+  ${green}5.${plain} 查看 Caddy 日志
+  ${green}6.${plain} 卸载 Caddy
+  ${green}7.${plain} 返回 N2X 主菜单
+ "
+    read -rp "请输入选择 [1-7]: " num
+    case "${num}" in
+        1) caddy_install_and_configure; before_caddy_menu ;;
+        2) caddy_configure; before_caddy_menu ;;
+        3) caddy_validate_and_restart; before_caddy_menu ;;
+        4) caddy_status; before_caddy_menu ;;
+        5) caddy_log ;;
+        6) caddy_uninstall; before_caddy_menu ;;
+        7) show_menu ;;
+        *) echo -e "${red}请输入正确的数字 [1-7]${plain}"; before_caddy_menu ;;
+    esac
+}
+
+caddy_command() {
+    case "$1" in
+        install|"") caddy_install_and_configure ;;
+        config) caddy_configure ;;
+        restart) caddy_validate_and_restart ;;
+        status) caddy_status ;;
+        log) caddy_log ;;
+        uninstall) caddy_uninstall ;;
+        menu) caddy_menu ;;
+        *)
+            echo "N2X caddy install    - 安装/重新配置 Caddy"
+            echo "N2X caddy config     - 修改 Caddy 参数并重启"
+            echo "N2X caddy restart    - 重启 Caddy"
+            echo "N2X caddy status     - 查看 Caddy 状态"
+            echo "N2X caddy log        - 查看 Caddy 日志"
+            echo "N2X caddy uninstall  - 卸载 Caddy"
+            ;;
+    esac
 }
 
 install() {
@@ -960,6 +1514,7 @@ show_usage() {
     echo "N2X disable      - 取消 N2X 开机自启"
     echo "N2X log          - 查看 N2X 日志"
     echo "N2X env          - 创建/检测 .env"
+    echo "N2X caddy        - 管理 Caddy 443 分流"
     echo "N2X x25519       - 生成 x25519 密钥"
     echo "N2X generate     - 生成 N2X 配置文件"
     echo "N2X update       - 更新 N2X"
@@ -996,11 +1551,12 @@ show_menu() {
   ${green}15.${plain} 生成 N2X 配置文件
   ${green}16.${plain} 创建/检测 .env 文件
   ${green}17.${plain} 放行 VPS 的所有网络端口
-  ${green}18.${plain} 退出脚本
+  ${green}18.${plain} Caddy 443 分流管理
+  ${green}19.${plain} 退出脚本
  "
  #后续更新可加入上方字符串中
     show_status
-    echo && read -rp "请输入选择 [0-18]: " num
+    echo && read -rp "请输入选择 [0-19]: " num
 
     case "${num}" in
         0) config ;;
@@ -1021,8 +1577,9 @@ show_menu() {
         15) generate_config_file ;;
         16) manage_env_file ;;
         17) open_ports ;;
-        18) exit ;;
-        *) echo -e "${red}请输入正确的数字 [0-18]${plain}" ;;
+        18) caddy_menu ;;
+        19) exit ;;
+        *) echo -e "${red}请输入正确的数字 [0-19]${plain}" ;;
     esac
 }
 
@@ -1037,6 +1594,7 @@ if [[ $# > 0 ]]; then
         "disable") check_install 0 && disable 0 ;;
         "log") check_install 0 && show_log 0 ;;
         "env") manage_env_file 0 ;;
+        "caddy") caddy_command "${2:-}" ;;
         "update") check_install 0 && update 0 $2 ;;
         "config") config $* ;;
         "generate") generate_config_file ;;
