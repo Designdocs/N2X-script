@@ -894,9 +894,33 @@ update() {
     fi
 }
 
+ensure_vim_editor() {
+    if command -v vim >/dev/null 2>&1; then
+        return 0
+    fi
+
+    echo -e "${red}未检测到 vim，请先安装 vim 后再修改配置。${plain}"
+    case "$release" in
+        debian|ubuntu)
+            echo -e "${yellow}可执行: apt-get update && apt-get install -y vim${plain}"
+            ;;
+        centos)
+            echo -e "${yellow}可执行: yum install -y vim 或 dnf install -y vim${plain}"
+            ;;
+        alpine)
+            echo -e "${yellow}可执行: apk add vim${plain}"
+            ;;
+        arch)
+            echo -e "${yellow}可执行: pacman -S --noconfirm vim${plain}"
+            ;;
+    esac
+    return 1
+}
+
 config() {
     echo "N2X在修改配置后会自动尝试重启"
-    vi /etc/N2X/config.json
+    ensure_vim_editor || return 1
+    vim /etc/N2X/config.json
     sleep 2
     restart
     check_status
@@ -1515,6 +1539,7 @@ show_usage() {
     echo "N2X log          - 查看 N2X 日志"
     echo "N2X env          - 创建/检测 .env"
     echo "N2X caddy        - 管理 Caddy 443 分流"
+    echo "N2X update_shell - 升级脚本"
     echo "N2X x25519       - 生成 x25519 密钥"
     echo "N2X generate     - 生成 N2X 配置文件"
     echo "N2X update       - 更新 N2X"
@@ -1547,7 +1572,7 @@ show_menu() {
   ${green}11.${plain} 一键安装 bbr (最新内核)
   ${green}12.${plain} 查看 N2X 版本
   ${green}13.${plain} 生成 X25519 密钥
-  ${green}14.${plain} 升级 N2X 维护脚本
+  ${green}14.${plain} 升级脚本
   ${green}15.${plain} 生成 N2X 配置文件
   ${green}16.${plain} 创建/检测 .env 文件
   ${green}17.${plain} 放行 VPS 的所有网络端口
@@ -1602,7 +1627,7 @@ if [[ $# > 0 ]]; then
         "uninstall") check_install 0 && uninstall 0 ;;
         "x25519") check_install 0 && generate_x25519_key 0 ;;
         "version") check_install 0 && show_N2X_version 0 ;;
-        "update_shell") update_shell ;;
+        "update_shell"|"upgrade_shell"|"upgrade_script") update_shell ;;
         *) show_usage
     esac
 else

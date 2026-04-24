@@ -734,23 +734,23 @@ fi
 
 install_base() {
     if [[ x"${release}" == x"centos" ]]; then
-        yum install epel-release wget curl unzip tar crontabs socat ca-certificates gettext -y >/dev/null 2>&1 || die "yum 安装依赖失败"
+        yum install epel-release wget curl unzip tar crontabs socat ca-certificates gettext vim -y >/dev/null 2>&1 || die "yum 安装依赖失败"
         update-ca-trust force-enable >/dev/null 2>&1 || true
     elif [[ x"${release}" == x"alpine" ]]; then
-        apk add wget curl unzip tar socat ca-certificates gettext >/dev/null 2>&1 || die "apk 安装依赖失败"
+        apk add wget curl unzip tar socat ca-certificates gettext vim >/dev/null 2>&1 || die "apk 安装依赖失败"
         update-ca-certificates >/dev/null 2>&1 || true
     elif [[ x"${release}" == x"debian" ]]; then
         run_apt_with_auto_repair "update" update -y || die "apt-get update 失败"
-        run_apt_with_auto_repair "install dependencies" install wget curl unzip tar cron socat ca-certificates gettext-base -y || die "apt 安装依赖失败"
+        run_apt_with_auto_repair "install dependencies" install wget curl unzip tar cron socat ca-certificates gettext-base vim -y || die "apt 安装依赖失败"
         update-ca-certificates >/dev/null 2>&1 || true
     elif [[ x"${release}" == x"ubuntu" ]]; then
         run_apt_with_auto_repair "update" update -y || die "apt-get update 失败"
-        run_apt_with_auto_repair "install dependencies" install wget curl unzip tar cron socat gettext-base -y || die "apt 安装依赖失败"
+        run_apt_with_auto_repair "install dependencies" install wget curl unzip tar cron socat gettext-base vim -y || die "apt 安装依赖失败"
         run_apt_with_auto_repair "install certificates" install ca-certificates wget -y || true
         update-ca-certificates >/dev/null 2>&1 || true
     elif [[ x"${release}" == x"arch" ]]; then
         pacman -Sy --noconfirm >/dev/null 2>&1 || die "pacman 更新失败"
-        pacman -S --noconfirm --needed wget curl unzip tar cron socat gettext >/dev/null 2>&1 || die "pacman 安装依赖失败"
+        pacman -S --noconfirm --needed wget curl unzip tar cron socat gettext vim >/dev/null 2>&1 || die "pacman 安装依赖失败"
         pacman -S --noconfirm --needed ca-certificates wget >/dev/null 2>&1 || true
     fi
 }
@@ -1319,6 +1319,7 @@ EOF
     echo "N2X log          - 查看 N2X 日志"
     echo "N2X env          - 创建/检测 .env"
     echo "N2X caddy        - 管理 Caddy 443 分流"
+    echo "N2X update_shell - 升级脚本"
     echo "N2X x25519       - 生成 x25519 密钥"
     echo "N2X generate     - 生成 N2X 配置文件"
     echo "N2X update       - 更新 N2X"
