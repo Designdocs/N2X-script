@@ -58,7 +58,7 @@ if [[ x"${release}" == x"centos" ]]; then
         echo -e "${red}请使用 CentOS 7 或更高版本的系统！${plain}\n" && exit 1
     fi
     if [[ ${os_version} -eq 7 ]]; then
-        echo -e "${yellow}提示：当前版本仅维护 Xray-core，请确认节点协议为 vmess / vless / trojan / shadowsocks / anytls。${plain}\n"
+        echo -e "${yellow}提示：当前版本仅维护 Xray-core，请确认节点协议为 vmess / vless / trojan / shadowsocks / anytls / artx。${plain}\n"
     fi
 elif [[ x"${release}" == x"ubuntu" ]]; then
     if [[ ${os_version} -lt 16 ]]; then
@@ -1240,6 +1240,7 @@ add_node_config() {
     echo -e "${green}3. Vmess${plain}"
     echo -e "${green}4. Trojan${plain}"
     echo -e "${green}5. AnyTLS${plain}"
+    echo -e "${green}6. ArtX${plain}"
     read -rp "请输入：" NodeType
     case "$NodeType" in
         1 ) NodeType="shadowsocks" ;;
@@ -1247,12 +1248,13 @@ add_node_config() {
         3 ) NodeType="vmess" ;;
         4 ) NodeType="trojan" ;;
         5 ) NodeType="anytls" ;;
+        6 ) NodeType="artx" ;;
         * ) NodeType="shadowsocks" ;;
     esac
     if [ "$NodeType" == "vless" ]; then
         read -rp "请选择是否为reality节点？(y/n)" isreality
     fi
-    if [ "$NodeType" == "anytls" ]; then
+    if [ "$NodeType" == "anytls" ] || [ "$NodeType" == "artx" ]; then
         istls="y"
     fi
 

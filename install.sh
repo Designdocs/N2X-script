@@ -720,7 +720,7 @@ if [[ x"${release}" == x"centos" ]]; then
         echo -e "${red}请使用 CentOS 7 或更高版本的系统！${plain}\n" && exit 1
     fi
     if [[ ${os_version} -eq 7 ]]; then
-        echo -e "${yellow}提示：当前版本仅维护 Xray-core，请确认节点协议为 vmess / vless / trojan / shadowsocks / anytls。${plain}\n"
+        echo -e "${yellow}提示：当前版本仅维护 Xray-core，请确认节点协议为 vmess / vless / trojan / shadowsocks / anytls / artx。${plain}\n"
     fi
 elif [[ x"${release}" == x"ubuntu" ]]; then
     if [[ ${os_version} -lt 16 ]]; then

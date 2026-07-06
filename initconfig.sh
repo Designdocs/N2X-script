@@ -38,6 +38,7 @@ add_node_config() {
     echo -e "${green}3. Vmess${plain}"
     echo -e "${green}4. Trojan${plain}"
     echo -e "${green}5. AnyTLS${plain}"
+    echo -e "${green}6. ArtX${plain}"
     read -rp "请输入：" NodeType
     case "$NodeType" in
         1 ) NodeType="shadowsocks" ;;
@@ -45,12 +46,13 @@ add_node_config() {
         3 ) NodeType="vmess" ;;
         4 ) NodeType="trojan" ;;
         5 ) NodeType="anytls" ;;
+        6 ) NodeType="artx" ;;
         * ) NodeType="shadowsocks" ;;
     esac
     if [ "$NodeType" == "vless" ]; then
         read -rp "请选择是否为reality节点？(y/n)" isreality
     fi
-    if [ "$NodeType" == "anytls" ]; then
+    if [ "$NodeType" == "anytls" ] || [ "$NodeType" == "artx" ]; then
         istls="y"
     fi
 
