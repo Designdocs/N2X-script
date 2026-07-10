@@ -78,7 +78,9 @@ add_node_config() {
     if [ "$ipv6_support" -eq 1 ]; then
         listen_ip="::"
     fi
-    xray_dns_opts=""
+    xray_dns_opts='            "EnableDNS": false,
+            "DNSType": "UseIPv4",
+'
     if [ "$custom_dns_enabled" = true ]; then
         xray_dns_opts='            "EnableDNS": true,
             "DNSType": "UseIP",
@@ -92,6 +94,11 @@ add_node_config() {
             "NodeID": $NodeID,
             "NodeType": "$NodeType",
             "Timeout": 30,
+            "WebSocket": {
+                "Enabled": true,
+                "URL": "",
+                "Debug": false
+            },
             "ListenIP": "0.0.0.0",
             "SendIP": "0.0.0.0",
             "DeviceOnlineMinTraffic": 200,

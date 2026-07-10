@@ -82,7 +82,9 @@ add_node_config() {
     if [ "$ipv6_support" -eq 1 ]; then
         listen_ip="::"
     fi
-    xray_dns_opts=""
+    xray_dns_opts='            "EnableDNS": false,
+            "DNSType": "UseIPv4",
+'
     if [ "$custom_dns_enabled" = true ]; then
         xray_dns_opts='            "EnableDNS": true,
             "DNSType": "UseIP",
@@ -105,6 +107,11 @@ add_node_config() {
             "NodeID": $NodeID,
             "NodeType": "$NodeType",
             "Timeout": 30,
+            "WebSocket": {
+                "Enabled": true,
+                "URL": "",
+                "Debug": false
+            },
             "ListenIP": "0.0.0.0",
             "SendIP": "0.0.0.0",
             "DeviceOnlineMinTraffic": 200,
@@ -190,10 +197,7 @@ generate_config_file() {
 
     # 初始化核心配置数组
     cores_config="["
-    xray_dns_config_line=""
-    if [ "$custom_dns_enabled" = true ]; then
-        xray_dns_config_line='        "DnsConfigPath": "/etc/N2X/dns.json",'
-    fi
+    xray_dns_config_line='        "DnsConfigPath": "/etc/N2X/dns.json",'
 
     # 检查并添加xray核心配置
     if [ "$core_xray" = true ]; then
@@ -243,8 +247,8 @@ ${xray_dns_config_line}
 }
 EOF
 
-    # 如果启用了自定义 DNS，确保 dns.json 存在（安装脚本通常已生成，此处仅兜底）
-    if [ "$custom_dns_enabled" = true ] && [ "$core_xray" = true ]; then
+    # DnsConfigPath 默认指向 /etc/N2X/dns.json；N2X generate 单独运行时兜底创建。
+    if [ "$core_xray" = true ]; then
         if [[ ! -f /etc/N2X/dns.json ]]; then
             cat <<'EOF' > /etc/N2X/dns.json
 {

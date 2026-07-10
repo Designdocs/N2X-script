@@ -1292,18 +1292,24 @@ add_node_config() {
             "NodeID": $NodeID,
             "NodeType": "$NodeType",
             "Timeout": 30,
+            "WebSocket": {
+                "Enabled": true,
+                "URL": "",
+                "Debug": false
+            },
             "ListenIP": "0.0.0.0",
             "SendIP": "0.0.0.0",
             "DeviceOnlineMinTraffic": 200,
             "MinReportTraffic": 0,
+            "EnableDNS": false,
+            "DNSType": "UseIPv4",
             "EnableProxyProtocol": false,
             "EnableUot": true,
             "EnableTFO": true,
-            "DNSType": "UseIPv4",
-	            "CertConfig": {
+            "CertConfig": {
                 "CertMode": "$certmode",
                 "RejectUnknownSni": false,
-	                "CertDomain": "all.example.com",
+                "CertDomain": "all.example.com",
                 "CertFile": "/etc/N2X/fullchain.cer",
                 "KeyFile": "/etc/N2X/cert.key",
                 "Email": "example@gmail.com",
@@ -1386,6 +1392,7 @@ generate_config_file() {
             \"statsUserDownlink\": false,
             \"bufferSize\": 64
         },
+        \"DnsConfigPath\": \"/etc/N2X/dns.json\",
         \"OutboundConfigPath\": \"/etc/N2X/custom_outbound.json\",
         \"RouteConfigPath\": \"/etc/N2X/route.json\"
     },"
@@ -1414,6 +1421,21 @@ generate_config_file() {
     "Nodes": [$formatted_nodes_config]
 }
 EOF
+
+    # DnsConfigPath 默认指向 /etc/N2X/dns.json；N2X generate 单独运行时兜底创建。
+    if [ "$core_xray" = true ]; then
+        if [[ ! -f /etc/N2X/dns.json ]]; then
+            cat <<'EOF' > /etc/N2X/dns.json
+{
+  "servers": [
+    "1.1.1.1",
+    "8.8.8.8"
+  ],
+  "tag": "dns_inbound"
+}
+EOF
+        fi
+    fi
     
     # 创建 custom_outbound.json 文件
     cat <<EOF > /etc/N2X/custom_outbound.json
