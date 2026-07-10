@@ -1190,7 +1190,6 @@ install_N2X() {
     fi
     cp geoip.dat /etc/N2X/
     cp geosite.dat /etc/N2X/
-    ensure_env_file
     if [[ x"${release}" == x"alpine" ]]; then
         rm /etc/init.d/N2X -f
         cat <<EOF > /etc/init.d/N2X
@@ -1257,6 +1256,7 @@ EOF
     fi
 
     if [[ ! -f /etc/N2X/config.json ]]; then
+        ensure_env_file
         cp config.json /etc/N2X/ || true
         fix_etc_n2x_permissions
         echo -e ""
