@@ -31,7 +31,58 @@ fi
 artx_decoy_install_service alpine
 openrc_path="$fixture_root/etc/init.d/N2X-artx-decoy"
 grep -Fq 'command_args="decoy serve"' "$openrc_path"
-grep -Fq 'env_file="/etc/N2X/artx-decoy.env"' "$openrc_path"
+grep -Fq 'start_pre()' "$openrc_path"
+if grep -Fq 'env_file=' "$openrc_path"; then
+    echo 'OpenRC must explicitly export the decoy environment' >&2
+    exit 1
+fi
+
+# The generated OpenRC loader accepts a path only for fixture execution. OpenRC
+# calls it without arguments and therefore uses /etc/N2X/artx-decoy.env.
+# shellcheck disable=SC1090
+source "$openrc_path"
+unset N2X_ARTX_DECOY_LISTEN
+start_pre "$env_path"
+[[ "$N2X_ARTX_DECOY_LISTEN" == '127.0.0.1:61443' ]]
+unset N2X_ARTX_DECOY_LISTEN
+start_pre "$fixture_root/missing-decoy.env"
+[[ -z "${N2X_ARTX_DECOY_LISTEN:-}" ]]
+
+eerror() { :; }
+printf '%s\n' \
+    'N2X_ARTX_DECOY_LISTEN=127.0.0.1:61443' \
+    'N2X_ARTX_DECOY_LISTEN=127.0.0.1:62443' > "$env_path"
+unset N2X_ARTX_DECOY_LISTEN
+if start_pre "$env_path"; then
+    echo 'OpenRC loader must reject duplicate decoy listen values' >&2
+    exit 1
+fi
+printf '%s\n' 'N2X_ARTX_DECOY_LISTEN=127.0.0.1:61443' > "$env_path"
+
+service_log="$fixture_root/service-actions.log"
+systemctl() {
+    printf '%s\n' "$*" >> "$service_log"
+}
+curl() {
+    printf '%s\n' "curl $*" >> "$service_log"
+}
+export -f systemctl curl
+
+ARTX_DECOY_SKIP_SERVICE_ACTIONS=0
+artx_decoy_restart systemd
+[[ "$(sed -n '1p' "$service_log")" == 'restart N2X-artx-decoy' ]]
+[[ "$(sed -n '2p' "$service_log")" == curl*'http://127.0.0.1:61443/'* ]]
+[[ "$(sed -n '3p' "$service_log")" == 'restart N2X' ]]
+
+: > "$service_log"
+service() {
+    printf '%s\n' "$*" >> "$service_log"
+}
+export -f service
+artx_decoy_restart alpine
+[[ "$(sed -n '1p' "$service_log")" == 'N2X-artx-decoy restart' ]]
+[[ "$(sed -n '2p' "$service_log")" == curl*'http://127.0.0.1:61443/'* ]]
+[[ "$(sed -n '3p' "$service_log")" == 'N2X restart' ]]
 
 artx_decoy_uninstall systemd
 [[ ! -e "$unit_path" ]]
@@ -50,5 +101,12 @@ assert 'artx_decoy_install_service "$release"' in install
 assert '"artx_decoy.sh"' in install
 assert '"decoy") decoy_command' in manager
 assert 'main/artx_decoy.sh' in manager[manager.index("update_shell() {"):]
+assert install.count('start_pre()') >= 1, "main OpenRC service must load the decoy env"
+assert "cat <<'EOF' > /etc/init.d/N2X" in install
+assert 'env_file="/etc/N2X/artx-decoy.env"' not in install
+assert '--no-check-certificate' not in install[install.index('install_managed_shell_file() {'):install.index('install_support_scripts() {')]
+update_shell = manager[manager.index("update_shell() {"):manager.index("\n# 0: running")]
+assert '--no-check-certificate' not in update_shell
+assert update_shell.count('download_managed_shell_file') == 2
 assert '/etc/caddy/Caddyfile' not in (repo / "artx_decoy.sh").read_text()
 PY

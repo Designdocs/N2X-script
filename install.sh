@@ -493,36 +493,71 @@ download_file() {
     fi
 }
 
-install_file_from_local_or_remote() {
-    local local_name="$1" target_path="$2" remote_url="$3"
+download_managed_shell_file() {
+    local url="$1" target_path="$2" temporary_path
+    case "$url" in
+        https://*) ;;
+        *)
+            log_error "拒绝通过非 HTTPS 地址下载管理脚本：$url"
+            return 1
+            ;;
+    esac
 
-    if [[ -f "${SCRIPT_DIR}/${local_name}" ]]; then
-        cp "${SCRIPT_DIR}/${local_name}" "$target_path" || return 1
-        return 0
+    temporary_path="$(mktemp "${target_path}.tmp.XXXXXX")" || return 1
+    if command -v wget >/dev/null 2>&1; then
+        if ! wget -O "$temporary_path" "$url"; then
+            rm -f "$temporary_path"
+            return 1
+        fi
+    elif ! curl --proto '=https' --tlsv1.2 -fL --retry 3 --retry-delay 2 \
+        -o "$temporary_path" "$url"; then
+        rm -f "$temporary_path"
+        return 1
     fi
 
-    download_file "$remote_url" "$target_path"
+    if ! bash -n "$temporary_path"; then
+        rm -f "$temporary_path"
+        return 1
+    fi
+    mv -f "$temporary_path" "$target_path"
+}
+
+install_managed_shell_file() {
+    local local_name="$1" target_path="$2" remote_url="$3" temporary_path
+
+    if [[ ! -f "${SCRIPT_DIR}/${local_name}" ]]; then
+        download_managed_shell_file "$remote_url" "$target_path"
+        return
+    fi
+
+    temporary_path="$(mktemp "${target_path}.tmp.XXXXXX")" || return 1
+    if ! cp "${SCRIPT_DIR}/${local_name}" "$temporary_path" \
+        || ! bash -n "$temporary_path"; then
+        rm -f "$temporary_path"
+        return 1
+    fi
+    mv -f "$temporary_path" "$target_path"
 }
 
 install_support_scripts() {
     mkdir -p /usr/local/N2X/ || return 1
 
-    install_file_from_local_or_remote \
+    install_managed_shell_file \
         "N2X.sh" \
         "/usr/bin/N2X" \
         "https://raw.githubusercontent.com/Designdocs/N2X-script/main/N2X.sh" || return 1
 
-    install_file_from_local_or_remote \
+    install_managed_shell_file \
         "config_gen.sh" \
         "/usr/local/N2X/config_gen.sh" \
         "https://raw.githubusercontent.com/Designdocs/N2X-script/main/config_gen.sh" || return 1
 
-    install_file_from_local_or_remote \
+    install_managed_shell_file \
         "render_config.sh" \
         "/usr/local/N2X/render_config.sh" \
         "https://raw.githubusercontent.com/Designdocs/N2X-script/main/render_config.sh" || return 1
 
-    install_file_from_local_or_remote \
+    install_managed_shell_file \
         "artx_decoy.sh" \
         "/usr/local/N2X/artx_decoy.sh" \
         "https://raw.githubusercontent.com/Designdocs/N2X-script/main/artx_decoy.sh" || return 1
@@ -1198,7 +1233,7 @@ install_N2X() {
     cp geosite.dat /etc/N2X/
     if [[ x"${release}" == x"alpine" ]]; then
         rm /etc/init.d/N2X -f
-        cat <<EOF > /etc/init.d/N2X
+        cat <<'EOF' > /etc/init.d/N2X
 #!/sbin/openrc-run
 
 name="N2X"
@@ -1207,10 +1242,30 @@ description="N2X"
 command="/usr/local/N2X/N2X"
 command_args="server"
 command_user="root"
-env_file="/etc/N2X/artx-decoy.env"
 
 pidfile="/run/N2X.pid"
 command_background="yes"
+
+start_pre() {
+    local env_path="${1:-/etc/N2X/artx-decoy.env}"
+    local listen
+
+    [ -e "$env_path" ] || return 0
+    listen="$(awk '
+        /^N2X_ARTX_DECOY_LISTEN=/ {
+            count++
+            value = substr($0, index($0, "=") + 1)
+        }
+        END {
+            if (count != 1 || value == "" || value ~ /[[:space:]]/) exit 1
+            print value
+        }
+    ' "$env_path" 2>/dev/null)" || {
+        eerror "Invalid N2X_ARTX_DECOY_LISTEN in ${env_path}"
+        return 1
+    }
+    export N2X_ARTX_DECOY_LISTEN="$listen"
+}
 
 depend() {
         need net

@@ -73,9 +73,29 @@ description="Local service status endpoint"
 command="/usr/local/N2X/N2X"
 command_args="decoy serve"
 command_user="root"
-env_file="/etc/N2X/artx-decoy.env"
 pidfile="/run/N2X-artx-decoy.pid"
 command_background="yes"
+
+start_pre() {
+    local env_path="${1:-/etc/N2X/artx-decoy.env}"
+    local listen
+
+    [ -e "$env_path" ] || return 0
+    listen="$(awk '
+        /^N2X_ARTX_DECOY_LISTEN=/ {
+            count++
+            value = substr($0, index($0, "=") + 1)
+        }
+        END {
+            if (count != 1 || value == "" || value ~ /[[:space:]]/) exit 1
+            print value
+        }
+    ' "$env_path" 2>/dev/null)" || {
+        eerror "Invalid N2X_ARTX_DECOY_LISTEN in ${env_path}"
+        return 1
+    }
+    export N2X_ARTX_DECOY_LISTEN="$listen"
+}
 
 depend() {
     need net
@@ -108,9 +128,13 @@ artx_decoy_install_service() {
 artx_decoy_restart() {
     local release="${1:-systemd}"
     if [[ "$release" == "alpine" ]]; then
-        service N2X-artx-decoy restart
+        service N2X-artx-decoy restart || return 1
+        artx_decoy_health || return 1
+        service N2X restart
     else
-        systemctl restart N2X-artx-decoy
+        systemctl restart N2X-artx-decoy || return 1
+        artx_decoy_health || return 1
+        systemctl restart N2X
     fi
 }
 

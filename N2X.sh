@@ -878,7 +878,7 @@ decoy_command() {
     fi
     case "${1:-status}" in
         status) artx_decoy_status "$release" ;;
-        restart) artx_decoy_restart "$release" && artx_decoy_health ;;
+        restart) artx_decoy_restart "$release" ;;
         log) artx_decoy_log "$release" ;;
         *)
             echo "N2X decoy status   - 查看诱饵 Web 服务状态"
@@ -1125,15 +1125,47 @@ install_bbr() {
     bash <(curl -L -s https://github.com/ylx2016/Linux-NetSpeed/raw/master/tcpx.sh)
 }
 
+download_managed_shell_file() {
+    local url="$1" target_path="$2" temporary_path
+    case "$url" in
+        https://*) ;;
+        *)
+            echo -e "${red}拒绝通过非 HTTPS 地址下载管理脚本：${url}${plain}"
+            return 1
+            ;;
+    esac
+
+    temporary_path="$(mktemp "${target_path}.tmp.XXXXXX")" || return 1
+    if command -v wget >/dev/null 2>&1; then
+        if ! wget -O "$temporary_path" "$url"; then
+            rm -f "$temporary_path"
+            return 1
+        fi
+    elif ! curl --proto '=https' --tlsv1.2 -fL --retry 3 --retry-delay 2 \
+        -o "$temporary_path" "$url"; then
+        rm -f "$temporary_path"
+        return 1
+    fi
+
+    if ! bash -n "$temporary_path"; then
+        rm -f "$temporary_path"
+        return 1
+    fi
+    mv -f "$temporary_path" "$target_path"
+}
+
 update_shell() {
-    wget -O /usr/bin/N2X -N --no-check-certificate https://raw.githubusercontent.com/Designdocs/N2X-script/main/N2X.sh
-    if [[ $? != 0 ]]; then
+    if ! download_managed_shell_file \
+        https://raw.githubusercontent.com/Designdocs/N2X-script/main/N2X.sh \
+        /usr/bin/N2X; then
         echo ""
         echo -e "${red}下载脚本失败，请检查本机能否连接 Github${plain}"
         before_show_menu
     else
         chmod +x /usr/bin/N2X
-        if ! wget -O /usr/local/N2X/artx_decoy.sh -N --no-check-certificate https://raw.githubusercontent.com/Designdocs/N2X-script/main/artx_decoy.sh; then
+        if ! download_managed_shell_file \
+            https://raw.githubusercontent.com/Designdocs/N2X-script/main/artx_decoy.sh \
+            /usr/local/N2X/artx_decoy.sh; then
             echo -e "${yellow}管理脚本已更新，但诱饵服务模块下载失败；请稍后重新执行 N2X update_shell。${plain}"
             return 1
         fi
