@@ -522,9 +522,15 @@ install_support_scripts() {
         "/usr/local/N2X/render_config.sh" \
         "https://raw.githubusercontent.com/Designdocs/N2X-script/main/render_config.sh" || return 1
 
+    install_file_from_local_or_remote \
+        "artx_decoy.sh" \
+        "/usr/local/N2X/artx_decoy.sh" \
+        "https://raw.githubusercontent.com/Designdocs/N2X-script/main/artx_decoy.sh" || return 1
+
     chmod +x /usr/bin/N2X || return 1
     chmod +x /usr/local/N2X/render_config.sh >/dev/null 2>&1 || return 1
     chmod +x /usr/local/N2X/config_gen.sh >/dev/null 2>&1 || return 1
+    chmod +x /usr/local/N2X/artx_decoy.sh >/dev/null 2>&1 || return 1
     return 0
 }
 
@@ -1201,6 +1207,7 @@ description="N2X"
 command="/usr/local/N2X/N2X"
 command_args="server"
 command_user="root"
+env_file="/etc/N2X/artx-decoy.env"
 
 pidfile="/run/N2X.pid"
 command_background="yes"
@@ -1224,6 +1231,7 @@ Wants=network.target
 User=root
 Group=root
 Type=simple
+EnvironmentFile=-/etc/N2X/artx-decoy.env
 RuntimeDirectory=N2X
 RuntimeDirectoryMode=0755
 UMask=0077
@@ -1253,6 +1261,17 @@ EOF
         systemctl stop N2X
         systemctl enable N2X
         log_info "N2X ${last_version} 安装完成，已设置开机自启"
+    fi
+
+    # shellcheck source=/usr/local/N2X/artx_decoy.sh
+    if source /usr/local/N2X/artx_decoy.sh; then
+        if ! artx_decoy_install_service "$release"; then
+            log_warn "最小诱饵 Web 服务安装或启动失败；N2X 主服务仍将继续安装。"
+        elif ! artx_decoy_health; then
+            log_warn "最小诱饵 Web 服务暂未通过健康检查；可稍后执行 N2X decoy status 排查。"
+        fi
+    else
+        log_warn "未能加载最小诱饵 Web 服务安装模块；N2X 主服务仍将继续安装。"
     fi
 
     if [[ ! -f /etc/N2X/config.json ]]; then

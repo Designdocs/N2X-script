@@ -18,6 +18,11 @@ if [[ -f "$SCRIPT_DIR/config_gen.sh" ]]; then
 elif [[ -f /usr/local/N2X/config_gen.sh ]]; then
     source /usr/local/N2X/config_gen.sh
 fi
+if [[ -f "$SCRIPT_DIR/artx_decoy.sh" ]]; then
+    source "$SCRIPT_DIR/artx_decoy.sh"
+elif [[ -f /usr/local/N2X/artx_decoy.sh ]]; then
+    source /usr/local/N2X/artx_decoy.sh
+fi
 
 # check root
 [[ $EUID -ne 0 ]] && echo -e "${red}错误: ${plain} 必须使用root用户运行此脚本！\n" && exit 1
@@ -866,6 +871,24 @@ caddy_command() {
     esac
 }
 
+decoy_command() {
+    if ! declare -F artx_decoy_status >/dev/null 2>&1; then
+        echo -e "${red}最小诱饵 Web 服务管理模块未安装，请先执行 N2X update_shell。${plain}"
+        return 1
+    fi
+    case "${1:-status}" in
+        status) artx_decoy_status "$release" ;;
+        restart) artx_decoy_restart "$release" && artx_decoy_health ;;
+        log) artx_decoy_log "$release" ;;
+        *)
+            echo "N2X decoy status   - 查看诱饵 Web 服务状态"
+            echo "N2X decoy restart  - 重启并检查诱饵 Web 服务"
+            echo "N2X decoy log      - 查看诱饵 Web 服务日志"
+            return 1
+            ;;
+    esac
+}
+
 install() {
     bash <(curl -Ls https://raw.githubusercontent.com/Designdocs/N2X-script/main/install.sh)
     if [[ $? == 0 ]]; then
@@ -950,10 +973,16 @@ uninstall() {
         return 0
     fi
     if [[ x"${release}" == x"alpine" ]]; then
+        if declare -F artx_decoy_uninstall >/dev/null 2>&1; then
+            artx_decoy_uninstall "$release"
+        fi
         service N2X stop
         rc-update del N2X
         rm /etc/init.d/N2X -f
     else
+        if declare -F artx_decoy_uninstall >/dev/null 2>&1; then
+            artx_decoy_uninstall "$release"
+        fi
         systemctl stop N2X
         systemctl disable N2X
         rm /etc/systemd/system/N2X.service -f
@@ -1104,6 +1133,11 @@ update_shell() {
         before_show_menu
     else
         chmod +x /usr/bin/N2X
+        if ! wget -O /usr/local/N2X/artx_decoy.sh -N --no-check-certificate https://raw.githubusercontent.com/Designdocs/N2X-script/main/artx_decoy.sh; then
+            echo -e "${yellow}管理脚本已更新，但诱饵服务模块下载失败；请稍后重新执行 N2X update_shell。${plain}"
+            return 1
+        fi
+        chmod +x /usr/local/N2X/artx_decoy.sh
         echo -e "${green}升级脚本成功，请重新运行脚本${plain}" && exit 0
     fi
 }
@@ -1644,6 +1678,7 @@ if [[ $# > 0 ]]; then
         "log") check_install 0 && show_log 0 ;;
         "env") manage_env_file 0 ;;
         "caddy") caddy_command "${2:-}" ;;
+        "decoy") decoy_command "${2:-status}" ;;
         "update") check_install 0 && update 0 $2 ;;
         "config") config $* ;;
         "generate") generate_config_file ;;
