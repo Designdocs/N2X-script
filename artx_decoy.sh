@@ -157,9 +157,18 @@ artx_decoy_log() {
 }
 
 artx_decoy_health() {
-    local listen
+    local listen attempt
     listen="$(artx_decoy_listen_address)"
-    curl --fail --silent --show-error --head --max-time 3 "http://${listen}/" >/dev/null
+    for ((attempt = 1; attempt <= 20; attempt++)); do
+        if curl --fail --silent --head --max-time 1 "http://${listen}/" >/dev/null 2>&1; then
+            return 0
+        fi
+        if ((attempt < 20)); then
+            sleep 0.1
+        fi
+    done
+    echo "诱饵 Web 服务在 http://${listen}/ 未通过健康检查" >&2
+    return 1
 }
 
 artx_decoy_uninstall() {

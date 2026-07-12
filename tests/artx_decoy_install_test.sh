@@ -84,6 +84,41 @@ artx_decoy_restart alpine
 [[ "$(sed -n '2p' "$service_log")" == curl*'http://127.0.0.1:61443/'* ]]
 [[ "$(sed -n '3p' "$service_log")" == 'N2X restart' ]]
 
+health_attempts=0
+curl() {
+    health_attempts=$((health_attempts + 1))
+    echo 'transient curl failure' >&2
+    ((health_attempts >= 3))
+}
+sleep() {
+    :
+}
+export -f curl sleep
+health_error_log="$fixture_root/health-error.log"
+artx_decoy_health 2> "$health_error_log"
+[[ "$health_attempts" -eq 3 ]]
+[[ ! -s "$health_error_log" ]]
+
+: > "$service_log"
+health_attempts=0
+curl() {
+    health_attempts=$((health_attempts + 1))
+    echo 'persistent curl failure' >&2
+    return 1
+}
+export -f curl
+if artx_decoy_restart systemd 2> "$health_error_log"; then
+    echo 'restart must fail when the decoy never becomes healthy' >&2
+    exit 1
+fi
+[[ "$health_attempts" -eq 20 ]]
+[[ "$(grep -Fc '诱饵 Web 服务在 http://127.0.0.1:61443/ 未通过健康检查' "$health_error_log")" -eq 1 ]]
+[[ "$(grep -Fc 'restart N2X-artx-decoy' "$service_log")" -eq 1 ]]
+if grep -Fxq 'restart N2X' "$service_log"; then
+    echo 'N2X must not restart after an unhealthy decoy restart' >&2
+    exit 1
+fi
+
 artx_decoy_uninstall systemd
 [[ ! -e "$unit_path" ]]
 [[ -e "$env_path" ]]
