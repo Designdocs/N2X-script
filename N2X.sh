@@ -1376,8 +1376,8 @@ add_node_config() {
                 "CertMode": "$certmode",
                 "RejectUnknownSni": false,
                 "CertDomain": "all.example.com",
-                "CertFile": "/etc/N2X/fullchain-all.example.com.cer",
-                "KeyFile": "/etc/N2X/cert-all.example.com.key",
+                "CertFile": "/etc/N2X/fullchain-{domain}.cer",
+                "KeyFile": "/etc/N2X/cert-{domain}.key",
                 "Email": "example@gmail.com",
                 "Provider": "cloudflare",
                 "DNSEnv": {
