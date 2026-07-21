@@ -219,7 +219,8 @@ generate_config_file() {
         },
 ${xray_dns_config_line}
         \"OutboundConfigPath\": \"/etc/N2X/custom_outbound.json\",
-        \"RouteConfigPath\": \"/etc/N2X/route.json\"
+        \"RouteConfigPath\": \"/etc/N2X/route.json\",
+        \"EnableBTExtraSniffing\": true
     },"
     fi
 

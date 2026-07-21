@@ -1460,7 +1460,8 @@ generate_config_file() {
         },
         \"DnsConfigPath\": \"/etc/N2X/dns.json\",
         \"OutboundConfigPath\": \"/etc/N2X/custom_outbound.json\",
-        \"RouteConfigPath\": \"/etc/N2X/route.json\"
+        \"RouteConfigPath\": \"/etc/N2X/route.json\",
+        \"EnableBTExtraSniffing\": true
     },"
     fi
 
