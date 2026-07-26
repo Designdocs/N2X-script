@@ -288,6 +288,20 @@ EOF
         }
     },
     {
+        "tag": "socks5-unlock",
+        "protocol": "socks",
+        "settings": {
+            "servers": [{
+                "address": "socks5.example.invalid",
+                "port": 1080,
+                "users": [{
+                    "user": "USERNAME",
+                    "pass": "PASSWORD"
+                }]
+            }]
+        }
+    },
+    {
         "protocol": "blackhole",
         "tag": "block"
     }
@@ -353,6 +367,13 @@ EOF
             "port": "6881-6889,6969,2710,51413"
         },
         {
+            "type": "field",
+            "outboundTag": "socks5-unlock",
+            "domain": [
+                "domain:socks5-unlock.invalid"
+            ]
+        },
+        {
             "outboundTag": "IPv4_out",
             "network": "udp,tcp"
         }
@@ -363,7 +384,7 @@ EOF
     echo -e "${yellow}下一步建议：${plain}"
     echo -e "1. 检查 /etc/N2X/config.json 是否正确"
     echo -e "2. 证书模式为 dns/http 时确认域名解析与 API 参数无误"
-    echo -e "3. 如有自定义 DNS/路由，可编辑 /etc/N2X/dns.json 与 /etc/N2X/route.json"
+    echo -e "3. 如有自定义 DNS/路由或 SOCKS5 解锁，可编辑 /etc/N2X/dns.json、/etc/N2X/custom_outbound.json 与 /etc/N2X/route.json"
     echo -e "${yellow}正在重启 N2X 服务...${plain}"
     n2x restart
 }
