@@ -88,31 +88,40 @@ add_node_config() {
     fi
     node_config=$(cat <<EOF
 {
+            "_comment": "Core 固定填 xray；NodeID 填面板节点数字 ID；NodeType 可填 shadowsocks/vless/vmess/trojan/anytls/artx；Timeout 单位为秒。",
             "Core": "$core",
+            "_api_comment": "ApiHost 填面板完整 HTTP(S) 地址且不带接口路径；ApiKey 填面板对接密钥。",
             "ApiHost": "\${N2X_API_HOST}",
             "ApiKey": "\${N2X_API_KEY}",
             "NodeID": $NodeID,
             "NodeType": "$NodeType",
             "Timeout": 30,
             "WebSocket": {
+                "_comment": "Enabled=false 时仅使用 HTTP；URL 留空会根据 ApiHost 自动生成，也可填写完整 ws:// 或 wss:// 地址；Debug 仅排障时开启。",
                 "Enabled": true,
                 "URL": "",
                 "Debug": false
             },
             "ListenIP": "0.0.0.0",
             "SendIP": "0.0.0.0",
+            "_traffic_comment": "DeviceOnlineMinTraffic 和 ReportMinTraffic 的单位均为 KB；ReportMinTraffic=0 表示不设置最低上报流量。",
             "DeviceOnlineMinTraffic": 200,
-            "MinReportTraffic": 0,
-${xray_dns_opts}            "EnableProxyProtocol": false,
+            "ReportMinTraffic": 0,
+            "_dns_comment": "EnableDNS=true 时 DNSType 可填 AsIs/UseIP/UseIPv4/UseIPv6；false 时 DNSType 不生效。",
+${xray_dns_opts}            "_network_comment": "ListenIP/SendIP 可填 0.0.0.0、:: 或指定地址；EnableProxyProtocol 仅在受信任的前置代理发送 PROXY protocol 时开启；EnableUot/EnableTFO 填 true 或 false。",
+            "EnableProxyProtocol": false,
             "EnableUot": true,
             "EnableTFO": true,
             "CertConfig": {
+                "_comment": "CertMode 可填 none/file/http/dns/self：file 使用现有证书，http/dns 自动申请，self 生成自签证书；RejectUnknownSni=true 时拒绝未知 SNI。",
                 "CertMode": "$certmode",
                 "RejectUnknownSni": false,
                 "CertDomain": "all.example.com",
+                "_paths_comment": "http/dns/self 模式的 CertFile 和 KeyFile 支持 {domain}；file 模式请填写现有证书的实际绝对路径。",
                 "CertFile": "/etc/N2X/fullchain-{domain}.cer",
                 "KeyFile": "/etc/N2X/cert-{domain}.key",
                 "Email": "example@gmail.com",
+                "_provider_comment": "Provider 和 DNSEnv 仅 dns 模式使用；Provider 填 lego 支持的名称，例如 cloudflare、alidns。",
                 "Provider": "cloudflare",
                 "DNSEnv": {
                     "CF_API_KEY": "ExampleKEY",
