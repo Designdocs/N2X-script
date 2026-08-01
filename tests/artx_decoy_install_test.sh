@@ -14,10 +14,15 @@ source "$repo_dir/artx_decoy.sh"
 artx_decoy_ensure_env
 env_path="$fixture_root/etc/N2X/artx-decoy.env"
 grep -Fqx 'N2X_ARTX_DECOY_LISTEN=127.0.0.1:60443' "$env_path"
+grep -Fqx 'N2X_ARTX_DECOY_PROFILE=balanced' "$env_path"
 
 printf '%s\n' 'N2X_ARTX_DECOY_LISTEN=127.0.0.1:61443' > "$env_path"
 artx_decoy_ensure_env
 grep -Fqx 'N2X_ARTX_DECOY_LISTEN=127.0.0.1:61443' "$env_path"
+if grep -Fq 'N2X_ARTX_DECOY_PROFILE' "$env_path"; then
+    echo 'ensure_env must not rewrite an existing env file' >&2
+    exit 1
+fi
 
 artx_decoy_install_service systemd
 unit_path="$fixture_root/etc/systemd/system/N2X-artx-decoy.service"
@@ -47,6 +52,22 @@ start_pre "$env_path"
 unset N2X_ARTX_DECOY_LISTEN
 start_pre "$fixture_root/missing-decoy.env"
 [[ -z "${N2X_ARTX_DECOY_LISTEN:-}" ]]
+
+# systemd reads the whole env file, but OpenRC only gets what start_pre
+# exports, so the profile has to be exported there too or Alpine nodes would
+# silently ignore it.
+printf '%s\n' \
+    'N2X_ARTX_DECOY_LISTEN=127.0.0.1:61443' \
+    'N2X_ARTX_DECOY_PROFILE=media' > "$env_path"
+unset N2X_ARTX_DECOY_LISTEN N2X_ARTX_DECOY_PROFILE
+start_pre "$env_path"
+[[ "$N2X_ARTX_DECOY_LISTEN" == '127.0.0.1:61443' ]]
+[[ "$N2X_ARTX_DECOY_PROFILE" == 'media' ]]
+
+unset N2X_ARTX_DECOY_LISTEN N2X_ARTX_DECOY_PROFILE
+printf '%s\n' 'N2X_ARTX_DECOY_LISTEN=127.0.0.1:61443' > "$env_path"
+start_pre "$env_path"
+[[ -z "${N2X_ARTX_DECOY_PROFILE:-}" ]]
 
 eerror() { :; }
 printf '%s\n' \

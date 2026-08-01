@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 ARTX_DECOY_DEFAULT_LISTEN="127.0.0.1:60443"
+ARTX_DECOY_DEFAULT_PROFILE="balanced"
 ARTX_DECOY_ROOT="${ARTX_DECOY_ROOT:-}"
 ARTX_DECOY_SKIP_SERVICE_ACTIONS="${ARTX_DECOY_SKIP_SERVICE_ACTIONS:-0}"
 
@@ -17,7 +18,10 @@ artx_decoy_ensure_env() {
     env_path="$(artx_decoy_env_path)"
     mkdir -p "$(dirname "$env_path")" || return 1
     if [[ ! -f "$env_path" ]]; then
-        printf 'N2X_ARTX_DECOY_LISTEN=%s\n' "$ARTX_DECOY_DEFAULT_LISTEN" > "$env_path" || return 1
+        {
+            printf 'N2X_ARTX_DECOY_LISTEN=%s\n' "$ARTX_DECOY_DEFAULT_LISTEN"
+            printf 'N2X_ARTX_DECOY_PROFILE=%s\n' "$ARTX_DECOY_DEFAULT_PROFILE"
+        } > "$env_path" || return 1
     fi
     chmod 600 "$env_path" >/dev/null 2>&1 || true
 }
@@ -78,7 +82,7 @@ command_background="yes"
 
 start_pre() {
     local env_path="${1:-/etc/N2X/artx-decoy.env}"
-    local listen
+    local listen profile
 
     [ -e "$env_path" ] || return 0
     listen="$(awk '
@@ -95,6 +99,26 @@ start_pre() {
         return 1
     }
     export N2X_ARTX_DECOY_LISTEN="$listen"
+
+    # Optional. Absent means the service picks its own default, so only a
+    # duplicated or malformed entry is an error.
+    profile="$(awk '
+        /^N2X_ARTX_DECOY_PROFILE=/ {
+            count++
+            value = substr($0, index($0, "=") + 1)
+        }
+        END {
+            if (count > 1) exit 1
+            if (count == 1 && (value == "" || value ~ /[[:space:]]/)) exit 1
+            print value
+        }
+    ' "$env_path" 2>/dev/null)" || {
+        eerror "Invalid N2X_ARTX_DECOY_PROFILE in ${env_path}"
+        return 1
+    }
+    if [ -n "$profile" ]; then
+        export N2X_ARTX_DECOY_PROFILE="$profile"
+    fi
 }
 
 depend() {

@@ -1,0 +1,21 @@
+# Secrets. The panel API key lives in a .env next to these repos, and the
+# install scripts here write env files that carry the same values.
+.env
+.env.*
+*.env
+secrets.*
+*.private.json
+*.private.json5
+
+# Templates carry placeholders, not values, so they stay tracked.
+!.env.example
+!*.env.example
+
+# Local runtime config that carries API keys.
+config.json
+config.*.local
+
+# Editor and OS noise.
+.DS_Store
+.idea/
+.vscode/
