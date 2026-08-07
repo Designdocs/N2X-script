@@ -80,6 +80,17 @@ for row in "${matrix[@]}"; do
     # add_node_config emits a trailing comma so nodes concatenate; strip it.
     node_json="${nodes_config[0]%,}"
 
+    # Regression check for a bug json.load cannot see: command substitution
+    # strips trailing newlines, so two heredoc blocks concatenated directly
+    # against literal text can glue onto one line (e.g. "EnableTFO": true,
+    # "CertConfig": {) while staying perfectly valid, whitespace-insensitive
+    # JSON. Check the raw layout instead: CertConfig must start its own line.
+    if ! printf '%s\n' "$node_json" | grep -qE '^ {12}"CertConfig": \{$'; then
+        echo "FAIL choice ${choice}: \"CertConfig\" is not on its own line (a heredoc/command-substitution newline got eaten)" >&2
+        printf '%s\n' "$node_json" >&2
+        failures=$((failures + 1))
+    fi
+
     if ! result=$(printf '%s' "$node_json" | python3 -c '
 import json, sys
 n = json.load(sys.stdin)

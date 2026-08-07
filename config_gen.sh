@@ -167,6 +167,23 @@ EOF
 EOF
 }
 
+# 拼接核心选项与协议专属选项。
+#
+# 不能在调用处直接写 $(node_core_options)$(node_protocol_options) 后面紧跟字面
+# 文本——命令替换会把每个 $(...) 结尾的换行符吃掉，两块结尾的逗号就会和后面
+# 的 "CertConfig": { 粘在同一行（生成的 JSON 语法仍合法，但人工检查/编辑时
+# 格式是错的）。这里用 printf 显式补回内部换行，调用处把整个函数结果单独放在
+# heredoc 的一行上，末尾的换行由 heredoc 自身的换行符提供，不经过命令替换。
+node_extra_options() {
+    local core_opts protocol_opts
+    core_opts="$(node_core_options)"
+    protocol_opts="$(node_protocol_options)"
+    printf '%s\n' "$core_opts"
+    if [[ -n "$protocol_opts" ]]; then
+        printf '%s\n' "$protocol_opts"
+    fi
+}
+
 # 节点配置生成
 add_node_config() {
     core="xray"
@@ -206,7 +223,8 @@ add_node_config() {
             "SendIP": "0.0.0.0",
             "DeviceOnlineMinTraffic": 200,
             "ReportMinTraffic": 0,
-$(node_core_options)$(node_protocol_options)            "CertConfig": {
+$(node_extra_options)
+            "CertConfig": {
                 "CertMode": "$certmode",
                 "RejectUnknownSni": false,
                 "CertDomain": "all.example.com",
