@@ -67,6 +67,23 @@ load_env_file() {
 
 load_env_file
 
+# envsubst below only substitutes $VAR patterns; it does not care whether the
+# input is valid JSON, so a syntax error in CONFIG_PATH would otherwise only
+# surface deep inside N2X's own log with no line number (read_config_value's
+# python step hits the same file and silently swallows the same error, by
+# design, so it can gracefully fall back to .env). Surface it here once,
+# up front, with the line/column python's own parser reports.
+if command -v python3 >/dev/null 2>&1; then
+  python3 - "$CONFIG_PATH" <<'PY' >&2
+import json, sys
+path = sys.argv[1]
+try:
+    json.load(open(path))
+except Exception as e:
+    print(f"render_config.sh: {path} is not valid JSON: {e}")
+PY
+fi
+
 read_config_value() {
   # $1: logical key (ApiHost|ApiKey|CertDomain|CertProvider|CertEmail|CF_API_KEY|CLOUDFLARE_EMAIL)
   if ! command -v python3 >/dev/null 2>&1; then
