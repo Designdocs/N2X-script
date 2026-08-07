@@ -25,7 +25,7 @@ grep -Fq 'Level 可填 debug/info/warning/error/none' "$config_path"
 # Both cores and every protocol they serve must be documented.
 grep -Fq 'Type 可填 xray 或 sing' "$config_path"
 grep -Fq 'xray 核心可填 shadowsocks/vless/vmess/trojan/anytls/artx' "$config_path"
-for protocol in hysteria2 tuic shadowtls naive; do
+for protocol in hysteria tuic shadowtls naive; do
     if ! grep -Fq "$protocol" "$config_path"; then
         echo "protocol ${protocol} is missing from the generated config hints" >&2
         exit 1

@@ -42,7 +42,7 @@ matrix=(
     "5|anytls|xray|http|5;1"
     "6|artx|xray|http|6;1"
     "7|anytls|sing|http|7;1"
-    "8|hysteria2|sing|http|8;1"
+    "8|hysteria|sing|http|8;1"
     "9|tuic|sing|http|9;1"
     "10|shadowtls|sing|none|10;"
     "11|naive|sing|http|11;1"
@@ -196,7 +196,7 @@ if ! printf '%s' "$full_config" | python3 -c '
 import json, sys
 d = json.load(sys.stdin)
 assert [c["Type"] for c in d["Cores"]] == ["xray", "sing"], d["Cores"]
-assert [n["NodeType"] for n in d["Nodes"]] == ["hysteria2", "shadowtls"], d["Nodes"]
+assert [n["NodeType"] for n in d["Nodes"]] == ["hysteria", "shadowtls"], d["Nodes"]
 assert d["_help"]["Nodes.NodeType"]
 ' 2>&1; then
     echo "FAIL: assembled config.json is not valid" >&2

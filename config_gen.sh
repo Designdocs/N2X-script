@@ -44,9 +44,9 @@ select_node_protocol() {
     echo -e "${green}   6. ArtX${plain}"
     echo -e "${yellow}  —— sing-box 核心 ——${plain}"
     echo -e "${green}   7. AnyTLS${plain}（sing-box 实现）"
-    echo -e "${green}   8. Hysteria2${plain}"
-    echo -e "${green}   9. TUIC${plain}"
-    echo -e "${green}  10. ShadowTLS${plain}"
+    echo -e "${green}   8. Hysteria${plain}（V1/V2 由面板的「协议版本」决定）"
+    echo -e "${green}   9. TUIC${plain}（仅支持 V5）"
+    echo -e "${green}  10. ShadowTLS${plain}（需面板支持该协议）"
     echo -e "${green}  11. NaiveProxy${plain}"
     read -rp "请输入：" node_choice
     case "$node_choice" in
@@ -57,7 +57,7 @@ select_node_protocol() {
         5  ) NodeType="anytls";      core="xray"; istls="y" ;;
         6  ) NodeType="artx";        core="xray"; istls="y" ;;
         7  ) NodeType="anytls";      core="sing"; istls="y" ;;
-        8  ) NodeType="hysteria2";   core="sing"; istls="y" ;;
+        8  ) NodeType="hysteria";    core="sing"; istls="y" ;;
         9  ) NodeType="tuic";        core="sing"; istls="y" ;;
         10 ) NodeType="shadowtls";   core="sing"; nocert="y" ;;
         11 ) NodeType="naive";       core="sing"; istls="y" ;;
@@ -288,7 +288,7 @@ config_help_block() {
         "Cores.Sing.NTP": "Enable=true 时 sing 核心自行校时，适用于宿主机时间不准导致 TUIC/Hysteria2 握手失败的情况；ServerPort=0 表示使用默认 123。",
         "Cores.Sing.OriginalPath": "填写自定义 sing-box 基础配置的绝对路径，留空使用内置默认；只能使用 N2X 已注册的入站/出站类型。",
         "Nodes.Basic": "Core 填 xray 或 sing；NodeID 填面板节点数字 ID；Timeout 单位为秒。",
-        "Nodes.NodeType": "xray 核心可填 shadowsocks/vless/vmess/trojan/anytls/artx；sing 核心可填 shadowsocks/vless/vmess/trojan/anytls/hysteria/hysteria2/tuic/shadowtls/naive。anytls 两个核心都支持，用 Core 指定由谁承载。",
+        "Nodes.NodeType": "xray 核心可填 shadowsocks/vless/vmess/trojan/anytls/artx；sing 核心可填 shadowsocks/vless/vmess/trojan/anytls/hysteria/tuic/shadowtls/naive。anytls 两个核心都支持，用 Core 指定由谁承载。hysteria 节点填 hysteria 即可，V1/V2 由面板下发的 version 决定；tuic 仅支持 V5；shadowtls 需要面板支持该协议类型。",
         "Nodes.API": "ApiHost 填面板完整 HTTP(S) 地址且不带接口路径；ApiKey 填面板对接密钥。",
         "Nodes.WebSocket": "Enabled=false 时仅使用 HTTP；URL 留空会根据 ApiHost 自动生成，也可填写完整 ws:// 或 wss:// 地址；Debug 仅排障时开启。",
         "Nodes.Traffic": "DeviceOnlineMinTraffic 和 ReportMinTraffic 的单位均为 KB；ReportMinTraffic=0 表示不设置最低上报流量。",
