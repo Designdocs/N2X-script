@@ -75,15 +75,6 @@ elif [[ x"${release}" == x"debian" ]]; then
     fi
 fi
 
-# 检查系统是否有 IPv6 地址
-check_ipv6_support() {
-    if ip -6 addr | grep -q "inet6"; then
-        echo "1"  # 支持 IPv6
-    else
-        echo "0"  # 不支持 IPv6
-    fi
-}
-
 confirm() {
     if [[ $# > 1 ]]; then
         echo && read -rp "$1 [默认$2]: " temp
@@ -1285,113 +1276,15 @@ show_N2X_version() {
     fi
 }
 
-add_node_config() {
-    core="xray"
-    core_xray=true
-    isreality=""
-    istls=""
-    while true; do
-        read -rp "请输入节点Node ID：" NodeID
-        # 判断NodeID是否为正整数
-        if [[ "$NodeID" =~ ^[0-9]+$ ]]; then
-            break  # 输入正确，退出循环
-        else
-            echo "错误：请输入正确的数字作为Node ID。"
-        fi
-    done
-
-    echo -e "${yellow}请选择节点传输协议：${plain}"
-    echo -e "${green}1. Shadowsocks${plain}"
-    echo -e "${green}2. Vless${plain}"
-    echo -e "${green}3. Vmess${plain}"
-    echo -e "${green}4. Trojan${plain}"
-    echo -e "${green}5. AnyTLS${plain}"
-    echo -e "${green}6. ArtX${plain}"
-    read -rp "请输入：" NodeType
-    case "$NodeType" in
-        1 ) NodeType="shadowsocks" ;;
-        2 ) NodeType="vless" ;;
-        3 ) NodeType="vmess" ;;
-        4 ) NodeType="trojan" ;;
-        5 ) NodeType="anytls" ;;
-        6 ) NodeType="artx" ;;
-        * ) NodeType="shadowsocks" ;;
-    esac
-    if [ "$NodeType" == "vless" ]; then
-        read -rp "请选择是否为reality节点？(y/n)" isreality
-    fi
-    if [ "$NodeType" == "anytls" ] || [ "$NodeType" == "artx" ]; then
-        istls="y"
-    fi
-
-    if [[ "$isreality" != "y" && "$isreality" != "Y" &&  "$istls" != "y" ]]; then
-        read -rp "请选择是否进行TLS配置？(y/n)" istls
-    fi
-
-    certmode="none"
-    certdomain="example.com"
-    if [[ "$isreality" != "y" && "$isreality" != "Y" && ( "$istls" == "y" || "$istls" == "Y" ) ]]; then
-        echo -e "${yellow}请选择证书申请模式：${plain}"
-        echo -e "${green}1. http模式自动申请，节点域名已正确解析${plain}"
-        echo -e "${green}2. dns模式自动申请，需填入正确域名服务商API参数${plain}"
-        echo -e "${green}3. self模式，自签证书或提供已有证书文件${plain}"
-        read -rp "请输入：" certmode
-        case "$certmode" in
-            1 ) certmode="http" ;;
-            2 ) certmode="dns" ;;
-            3 ) certmode="self" ;;
-        esac
-        if [ "$certmode" != "http" ]; then
-            echo -e "${red}请手动修改配置文件后重启N2X！${plain}"
-        fi
-    fi
-    ipv6_support=$(check_ipv6_support)
-    listen_ip="0.0.0.0"
-    if [ "$ipv6_support" -eq 1 ]; then
-        listen_ip="::"
-    fi
-    node_config=$(cat <<EOF
-{
-            "Core": "$core",
-            "ApiHost": "$ApiHost",
-            "ApiKey": "$ApiKey",
-            "NodeID": $NodeID,
-            "NodeType": "$NodeType",
-            "Timeout": 30,
-            "WebSocket": {
-                "Enabled": true,
-                "URL": "",
-                "Debug": false
-            },
-            "ListenIP": "0.0.0.0",
-            "SendIP": "0.0.0.0",
-            "DeviceOnlineMinTraffic": 200,
-            "ReportMinTraffic": 0,
-            "EnableDNS": false,
-            "DNSType": "UseIPv4",
-            "EnableProxyProtocol": false,
-            "EnableUot": true,
-            "EnableTFO": true,
-            "CertConfig": {
-                "CertMode": "$certmode",
-                "RejectUnknownSni": false,
-                "CertDomain": "all.example.com",
-                "CertFile": "/etc/N2X/fullchain-{domain}.cer",
-                "KeyFile": "/etc/N2X/cert-{domain}.key",
-                "Email": "example@gmail.com",
-                "Provider": "cloudflare",
-                "DNSEnv": {
-                    "CF_API_KEY": "ExampleKEY",
-                    "CLOUDFLARE_EMAIL": "example@gmail.com"
-                }
-            }
-        },
-EOF
-)
-    nodes_config+=("$node_config")
-}
+# add_node_config / build_cores_config / config_help_block 等由 config_gen.sh
+# 提供（见本文件顶部的 source），此处不再重复定义。
 
 generate_config_file() {
+    if ! declare -F add_node_config >/dev/null; then
+        echo -e "${red}错误：未找到 config_gen.sh，无法生成配置。请重新安装或升级 N2X 后重试。${plain}"
+        return 1
+    fi
+
     echo -e "${yellow}N2X 配置文件生成向导${plain}"
     echo -e "${red}请阅读以下注意事项：${plain}"
     echo -e "${red}1. 目前该功能正处测试阶段${plain}"
@@ -1411,9 +1304,10 @@ generate_config_file() {
     nodes_config=()
     first_node=true
     core_xray=false
+    core_sing=false
     fixed_api_info=false
     check_api=false
-    
+
     while true; do
         if [ "$first_node" = true ]; then
             read -rp "请输入机场网址(https://example.com)：" ApiHost
@@ -1424,6 +1318,8 @@ generate_config_file() {
                 echo -e "${red}成功固定地址${plain}"
             fi
             first_node=false
+            api_host_val="$ApiHost"
+            api_key_val="$ApiKey"
             add_node_config
         else
             read -rp "是否继续添加节点配置？(回车继续，输入n或no退出)" continue_adding_node
@@ -1433,41 +1329,14 @@ generate_config_file() {
                 read -rp "请输入机场网址：" ApiHost
                 read -rp "请输入面板对接API Key：" ApiKey
             fi
+            api_host_val="$ApiHost"
+            api_key_val="$ApiKey"
             add_node_config
         fi
     done
 
-    # 初始化核心配置数组
-    cores_config="["
-
-    # 检查并添加xray核心配置
-    if [ "$core_xray" = true ]; then
-        cores_config+="
-    {
-        \"Type\": \"xray\",
-        \"Log\": {
-            \"Level\": \"error\",
-            \"ErrorPath\": \"/etc/N2X/error.log\"
-        },
-        \"ConnectionConfig\": {
-            \"handshake\": 4,
-            \"connIdle\": 300,
-            \"uplinkOnly\": 2,
-            \"downlinkOnly\": 5,
-            \"statsUserUplink\": false,
-            \"statsUserDownlink\": false,
-            \"bufferSize\": 64
-        },
-        \"DnsConfigPath\": \"/etc/N2X/dns.json\",
-        \"OutboundConfigPath\": \"/etc/N2X/custom_outbound.json\",
-        \"RouteConfigPath\": \"/etc/N2X/route.json\",
-        \"EnableBTExtraSniffing\": true
-    },"
-    fi
-
-    # 移除最后一个逗号并关闭数组
-    cores_config+="]"
-    cores_config=$(echo "$cores_config" | sed 's/},]$/}]/')
+    # 初始化核心配置数组（只写入实际用到的核心）
+    cores_config=$(build_cores_config)
 
     # 切换到配置文件目录
     cd /etc/N2X
@@ -1487,21 +1356,7 @@ generate_config_file() {
     "Cores": $cores_config,
     "Nodes": [$formatted_nodes_config],
     "_help": {
-        "Log": "Level 可填 debug/info/warn/error；Output 留空输出到控制台，否则填写日志文件绝对路径。",
-        "Cores.Type": "Type 目前固定填 xray；如配置多个同类核心，可增加 Name，并在节点中用 CoreName 指定。",
-        "Cores.Log": "Level 可填 debug/info/warning/error/none；ErrorPath 为空时输出到控制台。",
-        "Cores.ConnectionConfig": "handshake/connIdle/uplinkOnly/downlinkOnly 单位为秒；bufferSize 单位为 KB。",
-        "Cores.Paths": "DnsConfigPath/OutboundConfigPath/RouteConfigPath 均填写绝对路径；对应文件留空时使用核心内置默认配置。",
-        "Cores.EnableBTExtraSniffing": "控制 BT DHT 与 UDP tracker 嗅探；不需要时设为 false。",
-        "Nodes.Basic": "Core 固定填 xray；NodeID 填面板节点数字 ID；NodeType 可填 shadowsocks/vless/vmess/trojan/anytls/artx；Timeout 单位为秒。",
-        "Nodes.API": "ApiHost 填面板完整 HTTP(S) 地址且不带接口路径；ApiKey 填面板对接密钥。",
-        "Nodes.WebSocket": "Enabled=false 时仅使用 HTTP；URL 留空会根据 ApiHost 自动生成，也可填写完整 ws:// 或 wss:// 地址；Debug 仅排障时开启。",
-        "Nodes.Traffic": "DeviceOnlineMinTraffic 和 ReportMinTraffic 的单位均为 KB；ReportMinTraffic=0 表示不设置最低上报流量。",
-        "Nodes.DNS": "EnableDNS=true 时 DNSType 可填 AsIs/UseIP/UseIPv4/UseIPv6；false 时 DNSType 不生效。",
-        "Nodes.Network": "ListenIP/SendIP 可填 0.0.0.0、:: 或指定地址；EnableProxyProtocol 仅在受信任的前置代理发送 PROXY protocol 时开启；EnableUot/EnableTFO 填 true 或 false。",
-        "Nodes.CertConfig": "CertMode 可填 none/file/http/dns/self：file 使用现有证书，http/dns 自动申请，self 生成自签证书；RejectUnknownSni=true 时拒绝未知 SNI。",
-        "Nodes.CertPaths": "http/dns/self 模式的 CertFile 和 KeyFile 支持 {domain}；file 模式请填写现有证书的实际绝对路径。",
-        "Nodes.CertProvider": "Provider 和 DNSEnv 仅 dns 模式使用；Provider 填 lego 支持的名称，例如 cloudflare、alidns。"
+$(config_help_block)
     }
 }
 EOF
