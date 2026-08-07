@@ -18,6 +18,11 @@ if [[ -f "$SCRIPT_DIR/config_gen.sh" ]]; then
 elif [[ -f /usr/local/N2X/config_gen.sh ]]; then
     source /usr/local/N2X/config_gen.sh
 fi
+if [[ -f "$SCRIPT_DIR/config_append.sh" ]]; then
+    source "$SCRIPT_DIR/config_append.sh"
+elif [[ -f /usr/local/N2X/config_append.sh ]]; then
+    source /usr/local/N2X/config_append.sh
+fi
 if [[ -f "$SCRIPT_DIR/artx_decoy.sh" ]]; then
     source "$SCRIPT_DIR/artx_decoy.sh"
 elif [[ -f /usr/local/N2X/artx_decoy.sh ]]; then
@@ -1154,13 +1159,18 @@ update_shell() {
         before_show_menu
     else
         chmod +x /usr/bin/N2X
-        if ! download_managed_shell_file \
-            https://raw.githubusercontent.com/Designdocs/N2X-script/main/artx_decoy.sh \
-            /usr/local/N2X/artx_decoy.sh; then
-            echo -e "${yellow}管理脚本已更新，但诱饵服务模块下载失败；请稍后重新执行 N2X update_shell。${plain}"
-            return 1
-        fi
-        chmod +x /usr/local/N2X/artx_decoy.sh
+        # N2X.sh 只是壳，功能实现在这几个被 source 的文件里；只更新壳会让新菜单
+        # 调到不存在的函数，所以一起更新。
+        local module
+        for module in artx_decoy.sh config_gen.sh config_append.sh; do
+            if ! download_managed_shell_file \
+                "https://raw.githubusercontent.com/Designdocs/N2X-script/main/${module}" \
+                "/usr/local/N2X/${module}"; then
+                echo -e "${yellow}管理脚本已更新，但 ${module} 下载失败；请稍后重新执行 N2X update_shell。${plain}"
+                return 1
+            fi
+            chmod +x "/usr/local/N2X/${module}"
+        done
         echo -e "${green}升级脚本成功，请重新运行脚本${plain}" && exit 0
     fi
 }
@@ -1276,12 +1286,14 @@ show_N2X_version() {
     fi
 }
 
-# add_node_config / build_cores_config / config_help_block 等由 config_gen.sh
-# 提供（见本文件顶部的 source），此处不再重复定义。
+# add_node_config / build_cores_config / config_help_block / write_default_*_json
+# 等由 config_gen.sh 提供（见本文件顶部的 source），此处不再重复定义。
 
 generate_config_file() {
-    if ! declare -F add_node_config >/dev/null; then
-        echo -e "${red}错误：未找到 config_gen.sh，无法生成配置。请重新安装或升级 N2X 后重试。${plain}"
+    # write_default_route_json 是 config_gen.sh v4 才有的，一并检查可以挡住只升级
+    # 了 N2X.sh、config_gen.sh 还是旧版的情况。
+    if ! declare -F add_node_config >/dev/null || ! declare -F write_default_route_json >/dev/null; then
+        echo -e "${red}错误：未找到 config_gen.sh 或其版本过旧，无法生成配置。请重新安装或升级 N2X 后重试。${plain}"
         return 1
     fi
 
@@ -1364,129 +1376,14 @@ EOF
     # DnsConfigPath 默认指向 /etc/N2X/dns.json；N2X generate 单独运行时兜底创建。
     if [ "$core_xray" = true ]; then
         if [[ ! -f /etc/N2X/dns.json ]]; then
-            cat <<'EOF' > /etc/N2X/dns.json
-{
-  "servers": [
-    "1.1.1.1",
-    "8.8.8.8"
-  ],
-  "tag": "dns_inbound"
-}
-EOF
+            write_default_dns_json /etc/N2X/dns.json
         fi
     fi
-    
-    # 创建 custom_outbound.json 文件
-    cat <<EOF > /etc/N2X/custom_outbound.json
-    [
-        {
-            "tag": "IPv4_out",
-            "protocol": "freedom",
-            "settings": {
-                "domainStrategy": "UseIPv4v6"
-            }
-        },
-        {
-            "tag": "IPv6_out",
-            "protocol": "freedom",
-            "settings": {
-                "domainStrategy": "UseIPv6"
-            }
-        },
-        {
-            "tag": "socks5-unlock",
-            "protocol": "socks",
-            "settings": {
-                "servers": [{
-                    "address": "socks5.example.invalid",
-                    "port": 1080,
-                    "users": [{
-                        "user": "USERNAME",
-                        "pass": "PASSWORD"
-                    }]
-                }]
-            }
-        },
-        {
-            "protocol": "blackhole",
-            "tag": "block"
-        }
-    ]
-EOF
-    
-    # 创建 route.json 文件
-    cat <<EOF > /etc/N2X/route.json
-    {
-        "domainStrategy": "AsIs",
-        "rules": [
-            {
-                "type": "field",
-                "outboundTag": "block",
-                "ip": [
-                    "geoip:private"
-                ]
-            },
-            {
-                "type": "field",
-                "outboundTag": "block",
-                "domain": [
-                    "regexp:(^|[.])(api|ps|sv|offnavi|newvector|ulog[.]imap|newloc)([.]map|)[.](baidu|n[.]shifen)[.]com",
-                    "regexp:(^|[.])(360|so)[.](cn|com)",
-                    "regexp:(^|[^a-zA-Z]|bit|u)torrent",
-                    "regexp:(^|[.])(guerrillamail|guerrillamailblock|sharklasers|grr|pokemail|spam4|bccto|chacuo|027168)[.](info|biz|com|de|net|org|me|la)",
-                    "regexp:(^|[.])(xunlei|sandai)",
-                    "regexp:(^|[.])(dafahao|mingjinglive|botanwang|minghui|dongtaiwang|falunaz|epochtimes|ntdtv|falundafa|falungong|wujieliulan|zhengjian)[.](org|com|net)",
-                    "regexp:(^|[.])(ed2k|announce)([.]|$)",
-                    "regexp:(^|[.])(360)[.](cn|com|net)",
-                    "regexp:(^|[.])(guanjia[.]qq[.]com|qqpcmgr)",
-                    "regexp:(^|[.])(rising|kingsoft|duba|xindubawukong|jinshanduba)[.](com|net|org)",
-                    "regexp:(^|[.])(netvigator|torproject)[.](com|cn|net|org)",
-                    "regexp:(^|[.])(visa|mycard|gash|beanfun|bank)([.]|$)",
-                    "regexp:(^|[.])(gov|12377|12315|creaders|zhuichaguoji|cyberpolice|aboluowang|tuidang|epochtimes|zhengjian|mingjingnews|inmediahk|xinsheng|breakgfw|chengmingmag|jinpianwang|qi-gong|mhradio|edoors|renminbao|soundofhope|xizang-zhiye|bannedbook|ntdtv|12321|secretchina|dajiyuan|boxun|chinadigitaltimes|dwnews|huaglad|oneplusnews|epochweekly)[.](cn|com|org|net|club|fr|tw|hk|eu|info|me)",
-                    "regexp:(^|[.])(talk[.]news[.]pts[.]org|efcc[.]org|110[.]qq|cn[.]rfi)([.]|$)",
-                    "regexp:(^|[.])(miaozhen|cnzz|talkingdata|umeng)[.](cn|com)",
-                    "regexp:(^|[.])(mycard)[.](com|tw)",
-                    "regexp:(^|[.])(gash)[.](com|tw)",
-                    "regexp:(^|[.])(pincong)[.](rocks)",
-                    "regexp:(^|[.])(taobao)[.](com)",
-                    "regexp:(^|[.])(laomoe|jiyou|ssss|lolicp|vv1234|0z|4321q|868123|ksweb|mm126)[.](com|cloud|fun|cn|gs|xyz|cc)",
-                    "regexp:(^|[.])(flows|miaoko)[.](pages)[.](dev)"
-                ]
-            },
-            {
-                "type": "field",
-                "outboundTag": "block",
-                "ip": [
-                    "127.0.0.1/32",
-                    "10.0.0.0/8",
-                    "fc00::/7",
-                    "fe80::/10",
-                    "172.16.0.0/12"
-                ]
-            },
-            {
-                "type": "field",
-                "outboundTag": "block",
-                "protocol": [
-                    "bittorrent"
-                ]
-            },
-            {
-                "type": "field",
-                "outboundTag": "block",
-                "network": "tcp,udp",
-                "port": "6881-6889,6969,2710,51413"
-            },
-            {
-                "type": "field",
-                "outboundTag": "socks5-unlock",
-                "domain": [
-                    "domain:socks5-unlock.invalid"
-                ]
-            }
-        ]
-    }
-EOF
+
+    # custom_outbound.json / route.json：默认内容见 config_gen.sh 的
+    # write_default_*_json。生成配置是重建，这里按语义直接覆盖。
+    write_default_custom_outbound_json /etc/N2X/custom_outbound.json
+    write_default_route_json /etc/N2X/route.json
 
     echo -e "${green}N2X 配置文件生成完成${plain}"
     echo -e "${yellow}下一步建议：${plain}"
@@ -1496,6 +1393,34 @@ EOF
     echo -e "${yellow}正在重启 N2X 服务...${plain}"
     restart 0
     before_show_menu
+}
+
+# 在已有配置上追加协议，不重建配置。实现见 config_append.sh。
+add_protocol_config() {
+    if ! declare -F append_node_configs >/dev/null; then
+        echo -e "${red}错误：未找到 config_append.sh（或版本过旧），无法追加协议。${plain}"
+        echo -e "${yellow}请先执行 N2X update_shell 升级脚本，或重新安装 N2X 后重试。${plain}"
+        if [[ $# == 0 ]]; then
+            before_show_menu
+        fi
+        return 1
+    fi
+
+    echo -e "${yellow}在现有配置上新增协议${plain}"
+    echo -e "${green}已配置好的节点、核心参数与 /etc/N2X 下的其他文件都会保留，只做追加。${plain}"
+    echo -e "${green}原配置仍会备份到 /etc/N2X/config.json.bak。${plain}"
+
+    if append_node_configs; then
+        echo -e "${yellow}下一步建议：${plain}"
+        echo -e "1. 检查 /etc/N2X/config.json 中新增的节点"
+        echo -e "2. 证书模式为 dns/http 时确认域名解析与 API 参数无误"
+        echo -e "${yellow}正在重启 N2X 服务...${plain}"
+        restart 0
+    fi
+
+    if [[ $# == 0 ]]; then
+        before_show_menu
+    fi
 }
 
 # 放开防火墙端口
@@ -1530,7 +1455,8 @@ show_usage() {
     echo "N2X caddy        - 管理 Caddy 443 分流"
     echo "N2X update_shell - 升级脚本"
     echo "N2X x25519       - 生成 x25519 密钥"
-    echo "N2X generate     - 生成 N2X 配置文件"
+    echo "N2X generate     - 生成 N2X 配置文件（重建，会覆盖已有节点）"
+    echo "N2X addnode      - 在已有配置上增加协议配置"
     echo "N2X update       - 更新 N2X"
     echo "N2X update x.x.x - 安装 N2X 指定版本"
     echo "N2X install      - 安装 N2X"
@@ -1562,15 +1488,16 @@ show_menu() {
   ${green}12.${plain} 查看 N2X 版本
   ${green}13.${plain} 生成 X25519 密钥
   ${green}14.${plain} 升级脚本
-  ${green}15.${plain} 生成 N2X 配置文件
-  ${green}16.${plain} 创建/检测 .env 文件
-  ${green}17.${plain} 放行 VPS 的所有网络端口
-  ${green}18.${plain} Caddy 443 分流管理
-  ${green}19.${plain} 退出脚本
+  ${green}15.${plain} 生成 N2X 配置文件（重建，会覆盖已有节点）
+  ${green}16.${plain} 增加协议配置（在已有配置上追加节点）
+  ${green}17.${plain} 创建/检测 .env 文件
+  ${green}18.${plain} 放行 VPS 的所有网络端口
+  ${green}19.${plain} Caddy 443 分流管理
+  ${green}20.${plain} 退出脚本
  "
  #后续更新可加入上方字符串中
     show_status
-    echo && read -rp "请输入选择 [0-19]: " num
+    echo && read -rp "请输入选择 [0-20]: " num
 
     case "${num}" in
         0) config ;;
@@ -1589,11 +1516,12 @@ show_menu() {
         13) check_install && generate_x25519_key ;;
         14) update_shell ;;
         15) generate_config_file ;;
-        16) manage_env_file ;;
-        17) open_ports ;;
-        18) caddy_menu ;;
-        19) exit ;;
-        *) echo -e "${red}请输入正确的数字 [0-19]${plain}" ;;
+        16) add_protocol_config ;;
+        17) manage_env_file ;;
+        18) open_ports ;;
+        19) caddy_menu ;;
+        20) exit ;;
+        *) echo -e "${red}请输入正确的数字 [0-20]${plain}" ;;
     esac
 }
 
@@ -1613,6 +1541,7 @@ if [[ $# > 0 ]]; then
         "update") check_install 0 && update 0 $2 ;;
         "config") config $* ;;
         "generate") generate_config_file ;;
+        "addnode"|"add_node"|"append") add_protocol_config 0 ;;
         "install") check_uninstall 0 && install 0 ;;
         "uninstall") check_install 0 && uninstall 0 ;;
         "x25519") check_install 0 && generate_x25519_key 0 ;;

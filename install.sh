@@ -553,6 +553,11 @@ install_support_scripts() {
         "https://raw.githubusercontent.com/Designdocs/N2X-script/main/config_gen.sh" || return 1
 
     install_managed_shell_file \
+        "config_append.sh" \
+        "/usr/local/N2X/config_append.sh" \
+        "https://raw.githubusercontent.com/Designdocs/N2X-script/main/config_append.sh" || return 1
+
+    install_managed_shell_file \
         "render_config.sh" \
         "/usr/local/N2X/render_config.sh" \
         "https://raw.githubusercontent.com/Designdocs/N2X-script/main/render_config.sh" || return 1
@@ -565,7 +570,60 @@ install_support_scripts() {
     chmod +x /usr/bin/N2X || return 1
     chmod +x /usr/local/N2X/render_config.sh >/dev/null 2>&1 || return 1
     chmod +x /usr/local/N2X/config_gen.sh >/dev/null 2>&1 || return 1
+    chmod +x /usr/local/N2X/config_append.sh >/dev/null 2>&1 || return 1
     chmod +x /usr/local/N2X/artx_decoy.sh >/dev/null 2>&1 || return 1
+    return 0
+}
+
+# xray 配套文件：dns.json / custom_outbound.json / route.json。
+#
+# config.json 的 Cores.Paths 把 DnsConfigPath / OutboundConfigPath /
+# RouteConfigPath 指向这三个路径，xray 读不到其中任何一个就直接 panic，所以全新
+# 安装必须把它们落盘。
+#
+# 默认内容的唯一实现是 config_gen.sh 的 write_default_*_json，这里 source 它再
+# 调用。以前是从解压出来的发行包目录 cp，那既要求发行包一直带着这几个文件，又等
+# 于在仓库之外再存一份默认内容——两份迟早漂移。
+#
+# 只在文件缺失时写入：升级时用户改过的内容要原样保留。
+#
+# 两个路径都可以传参覆盖，默认就是生产路径；测试靠这个在临时目录里跑。
+install_xray_side_files() {
+    local cfg_dir="${1:-/etc/N2X}"
+    local config_gen="${2:-/usr/local/N2X/config_gen.sh}"
+    local entry name writer
+
+    if [[ ! -f "$config_gen" ]]; then
+        log_error "未找到 ${config_gen}，无法写入 xray 配套文件"
+        return 1
+    fi
+
+    # shellcheck source=/usr/local/N2X/config_gen.sh
+    if ! source "$config_gen"; then
+        log_error "加载 ${config_gen} 失败，无法写入 xray 配套文件"
+        return 1
+    fi
+
+    # write_default_route_json 是 config_gen.sh v4 才有的，挡住 config_gen.sh
+    # 还是旧版的情况——和 initconfig.sh / N2X.sh 里的检查同一个理由。
+    if ! declare -F write_default_route_json >/dev/null; then
+        log_error "${config_gen} 版本过旧，缺少 write_default_*_json"
+        return 1
+    fi
+
+    for entry in \
+        "dns.json:write_default_dns_json" \
+        "custom_outbound.json:write_default_custom_outbound_json" \
+        "route.json:write_default_route_json"
+    do
+        name="${entry%%:*}"
+        writer="${entry##*:}"
+        [[ -f "${cfg_dir}/${name}" ]] && continue
+        if ! "$writer" "${cfg_dir}/${name}"; then
+            log_error "写入 ${cfg_dir}/${name} 失败"
+            return 1
+        fi
+    done
     return 0
 }
 
@@ -1359,18 +1417,13 @@ EOF
         first_install=false
     fi
 
-    if [[ ! -f /etc/N2X/dns.json ]]; then
-        cp dns.json /etc/N2X/
+    # 这里不 die：二进制和服务都已经装好了，中断只会让用户既拿不到下面的使用说明
+    # 也不知道该修什么。报错并给出补救命令，安装继续走完。
+    if ! install_xray_side_files; then
+        log_error "xray 配套文件（dns.json / custom_outbound.json / route.json）未能全部写入 /etc/N2X/。"
+        log_error "使用 xray 核心时缺这些文件会导致核心启动即 panic，请修复后执行：N2X generate"
     fi
-    if [[ ! -f /etc/N2X/route.json ]]; then
-        cp route.json /etc/N2X/
-    fi
-    if [[ ! -f /etc/N2X/custom_outbound.json ]]; then
-        cp custom_outbound.json /etc/N2X/
-    fi
-    if [[ ! -f /etc/N2X/custom_inbound.json ]]; then
-        cp custom_inbound.json /etc/N2X/
-    fi
+
     # Cron: weekly geodata sync (Sat 04:00) and monthly update (1st 04:30)
     ensure_cron_job "0 4 * * 6" "/usr/bin/N2X update geodata -r >/var/log/N2X-geodata.log 2>&1"
     ensure_cron_job "30 4 1 * *" "/usr/bin/N2X update -r >/var/log/N2X-update.log 2>&1"
@@ -1395,7 +1448,8 @@ EOF
     echo "N2X caddy        - 管理 Caddy 443 分流"
     echo "N2X update_shell - 升级脚本"
     echo "N2X x25519       - 生成 x25519 密钥"
-    echo "N2X generate     - 生成 N2X 配置文件"
+    echo "N2X generate     - 生成 N2X 配置文件（重建，会覆盖已有节点）"
+    echo "N2X addnode      - 在已有配置上增加协议配置"
     echo "N2X update       - 更新 N2X"
     echo "N2X update x.x.x - 更新 N2X 指定版本"
     echo "N2X install      - 安装 N2X"

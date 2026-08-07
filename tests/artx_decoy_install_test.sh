@@ -156,13 +156,17 @@ assert 'EnvironmentFile=-/etc/N2X/artx-decoy.env' in install
 assert 'artx_decoy_install_service "$release"' in install
 assert '"artx_decoy.sh"' in install
 assert '"decoy") decoy_command' in manager
-assert 'main/artx_decoy.sh' in manager[manager.index("update_shell() {"):]
+update_shell = manager[manager.index("update_shell() {"):manager.index("\n# 0: running")]
+
+# N2X.sh 只是壳，功能在被 source 的模块里。update_shell 只换壳的话，新菜单会
+# 调到旧模块里不存在的函数，所以每个模块都必须一起更新。
+for module in ("artx_decoy.sh", "config_gen.sh", "config_append.sh"):
+    assert module in update_shell, module
+assert 'main/${module}' in update_shell
 assert install.count('start_pre()') >= 1, "main OpenRC service must load the decoy env"
 assert "cat <<'EOF' > /etc/init.d/N2X" in install
 assert 'env_file="/etc/N2X/artx-decoy.env"' not in install
 assert '--no-check-certificate' not in install[install.index('install_managed_shell_file() {'):install.index('install_support_scripts() {')]
-update_shell = manager[manager.index("update_shell() {"):manager.index("\n# 0: running")]
 assert '--no-check-certificate' not in update_shell
-assert update_shell.count('download_managed_shell_file') == 2
 assert '/etc/caddy/Caddyfile' not in (repo / "artx_decoy.sh").read_text()
 PY

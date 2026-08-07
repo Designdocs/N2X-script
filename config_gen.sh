@@ -6,12 +6,18 @@
 # always downloads it alongside N2X.sh, so it is present on any installed
 # system, and N2X.sh aborts with a clear message when it is not.
 #
+# 在已有配置上追加协议（而不是整份重写）的实现在 config_append.sh 里，它依赖
+# 本文件的 add_node_config / build_cores_config / write_default_*_json。
+#
+# xray 配套文件（dns.json / custom_outbound.json / route.json）的默认内容也在
+# 本文件末尾，见 write_default_*_json。
+#
 # Callers are expected to set, before calling add_node_config:
 #   api_host_val / api_key_val  节点里写入的 ApiHost / ApiKey 值
 #   custom_dns_enabled          true 时 xray 节点开启 EnableDNS/DNSType=UseIP
 # and to have initialised core_xray=false / core_sing=false.
 
-N2X_CONFIG_GEN_VERSION=2
+N2X_CONFIG_GEN_VERSION=4
 
 # 检查系统是否有 IPv6 地址
 check_ipv6_support() {
@@ -318,5 +324,150 @@ config_help_block() {
         "Nodes.CertConfig": "CertMode 可填 none/file/http/dns/self：file 使用现有证书，http/dns 自动申请，self 生成自签证书；RejectUnknownSni=true 时拒绝未知 SNI。hysteria2/tuic/naive/anytls 必须有可用证书，shadowtls 固定填 none。",
         "Nodes.CertPaths": "http/dns/self 模式的 CertFile 和 KeyFile 支持 {domain}；file 模式请填写现有证书的实际绝对路径。",
         "Nodes.CertProvider": "Provider 和 DNSEnv 仅 dns 模式使用；Provider 填 lego 支持的名称，例如 cloudflare、alidns。"
+EOF
+}
+
+# ---- xray 配套文件：dns.json / custom_outbound.json / route.json ----------
+#
+# 这三份默认内容以前在 initconfig.sh、N2X.sh、config_append.sh 里各存一份
+# heredoc，三份已经漂移：N2X.sh 少了末尾的 IPv4_out 兜底规则，config_append.sh
+# 整段域名黑名单都没有。这里是唯一实现，三个调用方都改成调用本节函数。
+#
+# 每个函数只做一件事：把默认内容写到 $1。是否覆盖已有文件由调用方决定——
+# 「生成配置」是重建，直接覆盖；「追加协议」只在文件缺失时才调用。
+#
+# 一律使用带引号的 <<'EOF'：route.json 的正则里含 $，不加引号时要靠 shell 恰好
+# 不展开 $) 才侥幸不出错，换个正则就会被静默改写。
+write_default_dns_json() {
+    cat <<'EOF' > "$1"
+{
+  "servers": [
+    "1.1.1.1",
+    "8.8.8.8"
+  ],
+  "tag": "dns_inbound"
+}
+EOF
+}
+
+write_default_custom_outbound_json() {
+    cat <<'EOF' > "$1"
+[
+    {
+        "tag": "IPv4_out",
+        "protocol": "freedom",
+        "settings": {
+            "domainStrategy": "UseIPv4v6"
+        }
+    },
+    {
+        "tag": "IPv6_out",
+        "protocol": "freedom",
+        "settings": {
+            "domainStrategy": "UseIPv6"
+        }
+    },
+    {
+        "tag": "socks5-unlock",
+        "protocol": "socks",
+        "settings": {
+            "servers": [{
+                "address": "socks5.example.invalid",
+                "port": 1080,
+                "users": [{
+                    "user": "USERNAME",
+                    "pass": "PASSWORD"
+                }]
+            }]
+        }
+    },
+    {
+        "protocol": "blackhole",
+        "tag": "block"
+    }
+]
+EOF
+}
+
+# 规则顺序即匹配顺序：先 block，再 socks5-unlock，最后 IPv4_out 兜底。
+# 每条都带 "type": "field"——这是 xray 唯一定义的规则类型，老版本核心缺了它会
+# 直接报错，新版本可省略，写上在任何版本都成立。
+write_default_route_json() {
+    cat <<'EOF' > "$1"
+{
+    "domainStrategy": "AsIs",
+    "rules": [
+        {
+            "type": "field",
+            "outboundTag": "block",
+            "ip": [
+                "geoip:private"
+            ]
+        },
+        {
+            "type": "field",
+            "outboundTag": "block",
+            "domain": [
+                "regexp:(^|[.])(api|ps|sv|offnavi|newvector|ulog[.]imap|newloc)([.]map|)[.](baidu|n[.]shifen)[.]com",
+                "regexp:(^|[.])(360|so)[.](cn|com)",
+                "regexp:(^|[^a-zA-Z]|bit|u)torrent",
+                "regexp:(^|[.])(guerrillamail|guerrillamailblock|sharklasers|grr|pokemail|spam4|bccto|chacuo|027168)[.](info|biz|com|de|net|org|me|la)",
+                "regexp:(^|[.])(xunlei|sandai)",
+                "regexp:(^|[.])(dafahao|mingjinglive|botanwang|minghui|dongtaiwang|falunaz|epochtimes|ntdtv|falundafa|falungong|wujieliulan|zhengjian)[.](org|com|net)",
+                "regexp:(^|[.])(ed2k|announce)([.]|$)",
+                "regexp:(^|[.])(360)[.](cn|com|net)",
+                "regexp:(^|[.])(guanjia[.]qq[.]com|qqpcmgr)",
+                "regexp:(^|[.])(rising|kingsoft|duba|xindubawukong|jinshanduba)[.](com|net|org)",
+                "regexp:(^|[.])(netvigator|torproject)[.](com|cn|net|org)",
+                "regexp:(^|[.])(visa|mycard|gash|beanfun|bank)([.]|$)",
+                "regexp:(^|[.])(gov|12377|12315|creaders|zhuichaguoji|cyberpolice|aboluowang|tuidang|epochtimes|zhengjian|mingjingnews|inmediahk|xinsheng|breakgfw|chengmingmag|jinpianwang|qi-gong|mhradio|edoors|renminbao|soundofhope|xizang-zhiye|bannedbook|ntdtv|12321|secretchina|dajiyuan|boxun|chinadigitaltimes|dwnews|huaglad|oneplusnews|epochweekly)[.](cn|com|org|net|club|fr|tw|hk|eu|info|me)",
+                "regexp:(^|[.])(talk[.]news[.]pts[.]org|efcc[.]org|110[.]qq|cn[.]rfi)([.]|$)",
+                "regexp:(^|[.])(miaozhen|cnzz|talkingdata|umeng)[.](cn|com)",
+                "regexp:(^|[.])(mycard)[.](com|tw)",
+                "regexp:(^|[.])(gash)[.](com|tw)",
+                "regexp:(^|[.])(pincong)[.](rocks)",
+                "regexp:(^|[.])(taobao)[.](com)",
+                "regexp:(^|[.])(laomoe|jiyou|ssss|lolicp|vv1234|0z|4321q|868123|ksweb|mm126)[.](com|cloud|fun|cn|gs|xyz|cc)",
+                "regexp:(^|[.])(flows|miaoko)[.](pages)[.](dev)"
+            ]
+        },
+        {
+            "type": "field",
+            "outboundTag": "block",
+            "ip": [
+                "127.0.0.1/32",
+                "10.0.0.0/8",
+                "fc00::/7",
+                "fe80::/10",
+                "172.16.0.0/12"
+            ]
+        },
+        {
+            "type": "field",
+            "outboundTag": "block",
+            "protocol": [
+                "bittorrent"
+            ]
+        },
+        {
+            "type": "field",
+            "outboundTag": "block",
+            "network": "tcp,udp",
+            "port": "6881-6889,6969,2710,51413"
+        },
+        {
+            "type": "field",
+            "outboundTag": "socks5-unlock",
+            "domain": [
+                "domain:socks5-unlock.invalid"
+            ]
+        },
+        {
+            "type": "field",
+            "outboundTag": "IPv4_out",
+            "network": "udp,tcp"
+        }
+    ]
+}
 EOF
 }

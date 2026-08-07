@@ -8,10 +8,12 @@ elif [[ -f /usr/local/N2X/config_gen.sh ]]; then
     source /usr/local/N2X/config_gen.sh
 fi
 
-# config_gen.sh 提供 add_node_config / build_cores_config / config_help_block 等
-# 共享实现，本文件不再重复定义。缺失时直接报错，避免生成半成品配置。
-if ! declare -F add_node_config >/dev/null; then
-    echo "错误：未找到 config_gen.sh，无法生成配置。请重新安装或升级 N2X 后重试。" >&2
+# config_gen.sh 提供 add_node_config / build_cores_config / config_help_block /
+# write_default_*_json 等共享实现，本文件不再重复定义。缺失时直接报错，避免生成
+# 半成品配置。write_default_route_json 是 config_gen.sh v4 才有的，一并检查可以
+# 挡住只升级了本文件、config_gen.sh 还是旧版的情况。
+if ! declare -F add_node_config >/dev/null || ! declare -F write_default_route_json >/dev/null; then
+    echo "错误：未找到 config_gen.sh 或其版本过旧，无法生成配置。请重新安装或升级 N2X 后重试。" >&2
     return 1 2>/dev/null || exit 1
 fi
 
@@ -104,15 +106,7 @@ EOF
     # DnsConfigPath 默认指向 /etc/N2X/dns.json；N2X generate 单独运行时兜底创建。
     if [ "$core_xray" = true ]; then
         if [[ ! -f /etc/N2X/dns.json ]]; then
-            cat <<'EOF' > /etc/N2X/dns.json
-{
-  "servers": [
-    "1.1.1.1",
-    "8.8.8.8"
-  ],
-  "tag": "dns_inbound"
-}
-EOF
+            write_default_dns_json /etc/N2X/dns.json
         fi
     fi
 
@@ -123,116 +117,10 @@ N2X_API_KEY=please_fill_me
 EOF
     fi
     
-    # 创建 custom_outbound.json 文件
-    cat <<EOF > /etc/N2X/custom_outbound.json
-[
-    {
-        "tag": "IPv4_out",
-        "protocol": "freedom",
-        "settings": {
-            "domainStrategy": "UseIPv4v6"
-        }
-    },
-    {
-        "tag": "IPv6_out",
-        "protocol": "freedom",
-        "settings": {
-            "domainStrategy": "UseIPv6"
-        }
-    },
-    {
-        "tag": "socks5-unlock",
-        "protocol": "socks",
-        "settings": {
-            "servers": [{
-                "address": "socks5.example.invalid",
-                "port": 1080,
-                "users": [{
-                    "user": "USERNAME",
-                    "pass": "PASSWORD"
-                }]
-            }]
-        }
-    },
-    {
-        "protocol": "blackhole",
-        "tag": "block"
-    }
-]
-EOF
-    
-    # 创建 route.json 文件
-    cat <<EOF > /etc/N2X/route.json
-{
-    "domainStrategy": "AsIs",
-    "rules": [
-        {
-            "outboundTag": "block",
-            "ip": [
-                "geoip:private"
-            ]
-        },
-        {
-            "outboundTag": "block",
-            "domain": [
-                "regexp:(^|[.])(api|ps|sv|offnavi|newvector|ulog[.]imap|newloc)([.]map|)[.](baidu|n[.]shifen)[.]com",
-                "regexp:(^|[.])(360|so)[.](cn|com)",
-                "regexp:(^|[^a-zA-Z]|bit|u)torrent",
-                "regexp:(^|[.])(guerrillamail|guerrillamailblock|sharklasers|grr|pokemail|spam4|bccto|chacuo|027168)[.](info|biz|com|de|net|org|me|la)",
-                "regexp:(^|[.])(xunlei|sandai)",
-                "regexp:(^|[.])(dafahao|mingjinglive|botanwang|minghui|dongtaiwang|falunaz|epochtimes|ntdtv|falundafa|falungong|wujieliulan|zhengjian)[.](org|com|net)",
-                "regexp:(^|[.])(ed2k|announce)([.]|$)",
-                "regexp:(^|[.])(360)[.](cn|com|net)",
-                "regexp:(^|[.])(guanjia[.]qq[.]com|qqpcmgr)",
-                "regexp:(^|[.])(rising|kingsoft|duba|xindubawukong|jinshanduba)[.](com|net|org)",
-                "regexp:(^|[.])(netvigator|torproject)[.](com|cn|net|org)",
-                "regexp:(^|[.])(visa|mycard|gash|beanfun|bank)([.]|$)",
-                "regexp:(^|[.])(gov|12377|12315|creaders|zhuichaguoji|cyberpolice|aboluowang|tuidang|epochtimes|zhengjian|mingjingnews|inmediahk|xinsheng|breakgfw|chengmingmag|jinpianwang|qi-gong|mhradio|edoors|renminbao|soundofhope|xizang-zhiye|bannedbook|ntdtv|12321|secretchina|dajiyuan|boxun|chinadigitaltimes|dwnews|huaglad|oneplusnews|epochweekly)[.](cn|com|org|net|club|fr|tw|hk|eu|info|me)",
-                "regexp:(^|[.])(talk[.]news[.]pts[.]org|efcc[.]org|110[.]qq|cn[.]rfi)([.]|$)",
-                "regexp:(^|[.])(miaozhen|cnzz|talkingdata|umeng)[.](cn|com)",
-                "regexp:(^|[.])(mycard)[.](com|tw)",
-                "regexp:(^|[.])(gash)[.](com|tw)",
-                "regexp:(^|[.])(pincong)[.](rocks)",
-                "regexp:(^|[.])(taobao)[.](com)",
-                "regexp:(^|[.])(laomoe|jiyou|ssss|lolicp|vv1234|0z|4321q|868123|ksweb|mm126)[.](com|cloud|fun|cn|gs|xyz|cc)",
-                "regexp:(^|[.])(flows|miaoko)[.](pages)[.](dev)"
-            ]
-        },
-        {
-            "outboundTag": "block",
-            "ip": [
-                "127.0.0.1/32",
-                "10.0.0.0/8",
-                "fc00::/7",
-                "fe80::/10",
-                "172.16.0.0/12"
-            ]
-        },
-        {
-            "outboundTag": "block",
-            "protocol": [
-                "bittorrent"
-            ]
-        },
-        {
-            "outboundTag": "block",
-            "network": "tcp,udp",
-            "port": "6881-6889,6969,2710,51413"
-        },
-        {
-            "type": "field",
-            "outboundTag": "socks5-unlock",
-            "domain": [
-                "domain:socks5-unlock.invalid"
-            ]
-        },
-        {
-            "outboundTag": "IPv4_out",
-            "network": "udp,tcp"
-        }
-    ]
-}
-EOF
+    # custom_outbound.json / route.json：默认内容见 config_gen.sh 的
+    # write_default_*_json。生成配置是重建，这里按语义直接覆盖。
+    write_default_custom_outbound_json /etc/N2X/custom_outbound.json
+    write_default_route_json /etc/N2X/route.json
     echo -e "${green}N2X 配置文件生成完成${plain}"
     echo -e "${yellow}下一步建议：${plain}"
     echo -e "1. 检查 /etc/N2X/config.json 是否正确"
