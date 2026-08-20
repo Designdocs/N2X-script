@@ -89,15 +89,24 @@ def rule_insert_index(rules):
     return len(rules)
 
 
-# 用户要求新出站排在 IPv4_out / IPv6_out 之前。注意副作用：xray 把出站列表里的第一
-# 条当默认出站，所以插到最前面会顺带改掉默认出站。默认 route.json 最后一条是
-# network=udp,tcp 的兜底规则，任何连接都会命中它，默认出站实际用不上；但如果谁把那
-# 条兜底删了，未命中规则的流量就会走这里的解锁出站。
+# 新出站插在 block 之前，也就是 IPv4_out / IPv6_out 之后。
+#
+# 顺序不影响规则是否生效（路由是靠 outboundTag 找出站的），它只决定默认出站：
+# app/proxyman/outbound 的 AddHandler 把第一个注册的 handler 存成 defaultHandler。
+# 所以关键是别占掉第 0 位——否则一旦 route.json 末尾那条 network=udp,tcp 的兜底规则
+# 被删掉，未命中任何规则的流量就会全部走这条解锁代理，而不是直连。
+#
+# 找不到 block 就追加到末尾；block 恰好排在第 0 位这种畸形配置，就退让到 1，
+# 不去擅自重排用户已有的出站。
 def outbound_insert_index(outbounds):
-    for index, ob in enumerate(outbounds):
-        if ob.get("tag") in ("IPv4_out", "IPv6_out"):
-            return index
-    return 0
+    index = len(outbounds)
+    for position, ob in enumerate(outbounds):
+        if ob.get("tag") == "block":
+            index = position
+            break
+    if outbounds and index == 0:
+        index = 1
+    return index
 
 
 mode = sys.argv[1]

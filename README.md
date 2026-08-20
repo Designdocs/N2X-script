@@ -126,7 +126,7 @@ N2X download off domain
 一条配置同时改两个文件：
 
 ```jsonc
-// custom_outbound.json —— 插在 IPv4_out / IPv6_out 之前
+// custom_outbound.json —— 插在 block 之前（即 IPv4_out / IPv6_out 之后）
 {
     "tag": "http-unlock",
     "protocol": "http",
@@ -166,12 +166,23 @@ N2X download off domain
 
 `route.json` 的规则插在**第一条无匹配条件的兜底规则之前**——插在兜底之后永远匹配不到。
 
-`custom_outbound.json` 的出站按要求插在 `IPv4_out` / `IPv6_out` **之前**。需要知道的是：
-路由是靠 `outboundTag` 找出站的，出站顺序不影响规则是否生效；顺序唯一的作用是
-**列表第一条会成为默认出站**（`app/proxyman/outbound` 里 `AddHandler` 把第一个注册的
-handler 存为 `defaultHandler`）。默认 `route.json` 最后一条 `network: udp,tcp` 的兜底规则
-会兜住所有连接，默认出站实际用不上；但如果谁把那条兜底删了，未命中任何规则的流量就会
-走这里的解锁出站而不是直连。
+`custom_outbound.json` 的出站插在 `block` **之前**，也就是 `IPv4_out` / `IPv6_out` 之后：
+
+```
+0. IPv4_out       <- 默认出站
+1. IPv6_out
+2. socks5-unlock
+3. http-unlock    <- 新加的排这里
+4. block
+```
+
+出站顺序不影响规则是否生效（路由是靠 `outboundTag` 找出站的），它唯一的作用是
+**列表第一条会成为默认出站**（`app/proxyman/outbound` 的 `AddHandler` 把第一个注册的
+handler 存成 `defaultHandler`）。所以关键是别占掉第 0 位：默认 `route.json` 最后一条
+`network: udp,tcp` 的兜底规则会兜住所有连接，默认出站平时用不上，但一旦那条兜底被删，
+未命中任何规则的流量就会全部走默认出站——那不该是一条计费的解锁代理。
+
+`block` 恰好排在第 0 位这种畸形配置，会退让到第 1 位，不去擅自重排用户已有的出站。
 
 两个文件同成同败：全程在内存里改、两边都校验通过才落盘，任一步失败两个文件都不动。
 

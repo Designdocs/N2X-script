@@ -85,11 +85,14 @@ rules = json.load(open(sys.argv[2]))["rules"]
 
 tags = [o.get("tag") for o in outbounds]
 assert "http-unlock" in tags, tags
-# 用户要求：新出站排在 IPv4_out / IPv6_out 之前
-assert tags.index("http-unlock") < tags.index("IPv4_out"), tags
-assert tags.index("http-unlock") < tags.index("IPv6_out"), tags
+# 新出站排在 IPv4_out / IPv6_out 之后、block 之前。
+assert tags.index("IPv4_out") < tags.index("http-unlock"), tags
+assert tags.index("IPv6_out") < tags.index("http-unlock"), tags
+assert tags.index("http-unlock") < tags.index("block"), tags
+# 列表第一条会被 xray 当默认出站，自定义解锁绝不能占这个位置
+assert tags[0] == "IPv4_out", tags
 # 原有出站一个不少、顺序不乱
-assert tags[-4:] == ["IPv4_out", "IPv6_out", "socks5-unlock", "block"], tags
+assert tags == ["IPv4_out", "IPv6_out", "socks5-unlock", "http-unlock", "block"], tags
 
 ob = next(o for o in outbounds if o["tag"] == "http-unlock")
 assert ob["protocol"] == "http"
@@ -132,7 +135,8 @@ srv = ob["settings"]["servers"][0]
 assert "users" not in srv, "没填账号就不该写空的 users"
 assert "streamSettings" not in ob, "没开 TLS 就不该写 streamSettings"
 tags = [o.get("tag") for o in outbounds]
-assert tags.index("sk5-unlock") < tags.index("IPv4_out")
+assert tags.index("IPv4_out") < tags.index("sk5-unlock") < tags.index("block"), tags
+assert tags[0] == "IPv4_out", tags
 PY
 [[ "$(outbound_unlock_tags)" == "http-unlock sk5-unlock" ]] \
     || fail "两条都应在，实得 [$(outbound_unlock_tags)]"
@@ -146,6 +150,33 @@ ob = next(o for o in json.load(open(sys.argv[1])) if o["tag"] == "tls-unlock")
 t = ob["streamSettings"]["tlsSettings"]
 assert t["serverName"] == "sni.example.com"
 assert t["allowInsecure"] is True
+PY
+
+# --- 4b. 畸形出站文件：block 排在最前时也不能占掉默认出站的位置 -------------
+saved_ob="$(cat "$outbound")"
+python3 - "$outbound" <<'PY'
+import json, sys
+path = sys.argv[1]
+outbounds = json.load(open(path))
+block = next(o for o in outbounds if o.get("tag") == "block")
+outbounds.remove(block)
+json.dump([block] + outbounds, open(path, "w"), ensure_ascii=False, indent=4)
+PY
+outbound_unlock_add "edge-unlock" http e.example.com 8080 "" "" 0 "" 0 geosite:e     || fail "畸形出站文件下添加失败"
+python3 - "$outbound" <<'PY' || fail "畸形配置下的插入位置不对"
+import json, sys
+tags = [o.get("tag") for o in json.load(open(sys.argv[1]))]
+assert tags[0] == "block", tags          # 原有顺序不擅自重排
+assert tags.index("edge-unlock") != 0, "自定义解锁不能成为默认出站"
+PY
+printf '%s' "$saved_ob" > "$outbound"
+python3 - "$route" <<'PY'
+import json, sys
+path = sys.argv[1]
+route = json.load(open(path))
+route["rules"] = [r for r in route["rules"]
+                  if r.get("ruleTag") != "custom-unlock-edge-unlock"]
+json.dump(route, open(path, "w"), ensure_ascii=False, indent=4)
 PY
 
 # --- 5. 标签冲突：已存在的标签不能再加 --------------------------------------
