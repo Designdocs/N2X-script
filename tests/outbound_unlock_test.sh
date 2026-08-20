@@ -18,6 +18,7 @@ source "${repo_dir}/outbound_unlock.sh"
 for fn in outbound_unlock_validate_tag outbound_unlock_validate_port \
           outbound_unlock_validate_address outbound_unlock_validate_domain_entry \
           outbound_unlock_add outbound_unlock_tags outbound_unlock_clear \
+          outbound_unlock_parse_url outbound_unlock_add_raw \
           outbound_unlock_menu outbound_unlock_command; do
     declare -F "$fn" >/dev/null || fail "outbound_unlock.sh 未定义 ${fn}"
 done
@@ -267,7 +268,155 @@ if outbound_unlock_add "x" http a.com 80 "" "" 0 "" 0 geosite:x 2>/dev/null; the
     fail "custom_outbound.json 缺失时必须失败"
 fi
 
-# --- 11. 接线 ---------------------------------------------------------------
+# --- 11. 粘贴代理链接：解析出各字段 -----------------------------------------
+reset_files
+
+# 期望输出：protocol<TAB>address<TAB>port<TAB>user<TAB>pass<TAB>tls
+expect_url() {
+    local url="$1" want="$2" got
+    got="$(outbound_unlock_parse_url "$url")" \
+        || fail "链接应能解析：${url}"
+    [[ "$got" == "$want" ]] || fail "链接 ${url} 解析为 [${got}]，期望 [${want}]"
+}
+
+expect_url "socks5://user:pass@1.2.3.4:1080" \
+    "$(printf 'socks	1.2.3.4	1080	user	pass	0')"
+# socks5h 只是让代理端做 DNS，xray 的 socks 出站本来就把域名发给代理，同等对待
+expect_url "socks5h://u:p@host.example.com:1080" \
+    "$(printf 'socks	host.example.com	1080	u	p	0')"
+expect_url "socks://host.example.com:1080" \
+    "$(printf 'socks	host.example.com	1080			0')"
+expect_url "http://spvtsramrb:B8sd@abc.decodo.com:10003" \
+    "$(printf 'http	abc.decodo.com	10003	spvtsramrb	B8sd	0')"
+# https 映射成 http 协议 + TLS
+expect_url "https://u:p@abc.decodo.com:443" \
+    "$(printf 'http	abc.decodo.com	443	u	p	1')"
+# 百分号编码要还原，否则带 @ : / 的密码全错
+expect_url "http://us%40er:p%3Ap%2Fs@h.example.com:80" \
+    "$(printf 'http	h.example.com	80	us@er	p:p/s	0')"
+# IPv6 要脱掉方括号
+expect_url "socks5://[2001:db8::1]:1080" \
+    "$(printf 'socks	2001:db8::1	1080			0')"
+# 省略端口时按协议给默认值
+expect_url "http://h.example.com" "$(printf 'http	h.example.com	80			0')"
+expect_url "https://h.example.com" "$(printf 'http	h.example.com	443			1')"
+expect_url "socks5://h.example.com" "$(printf 'socks	h.example.com	1080			0')"
+# 路径和查询串直接丢掉
+expect_url "socks5://u:p@h.example.com:1080/foo?x=1" \
+    "$(printf 'socks	h.example.com	1080	u	p	0')"
+
+for bad in "" "notaurl" "ftp://a.com:21" "http://" "http://h.example.com:99999" \
+           "http://h.example.com:abc" "vmess://abcdef" "http://:8080"; do
+    outbound_unlock_parse_url "$bad" >/dev/null 2>&1 && fail "链接 [${bad}] 应被拒绝"
+done
+
+# 解析出来的字段要能直接喂给 outbound_unlock_add
+IFS=$'\t' read -r u_proto u_addr u_port u_user u_pass u_tls \
+    < <(outbound_unlock_parse_url "https://spvtsramrb:B8sd@abc.decodo.com:10003")
+outbound_unlock_add "from-url" "$u_proto" "$u_addr" "$u_port" "$u_user" "$u_pass" \
+    "$u_tls" "" 0 geosite:openai || fail "用链接解析结果添加失败"
+python3 - "$outbound" <<'PY' || fail "链接添加的内容不对"
+import json, sys
+ob = next(o for o in json.load(open(sys.argv[1])) if o["tag"] == "from-url")
+srv = ob["settings"]["servers"][0]
+assert ob["protocol"] == "http"
+assert srv["address"] == "abc.decodo.com" and srv["port"] == 10003
+assert srv["users"] == [{"user": "spvtsramrb", "pass": "B8sd"}]
+# 没给 SNI 时回落到地址本身
+assert ob["streamSettings"]["tlsSettings"]["serverName"] == "abc.decodo.com"
+PY
+
+# --- 12. 粘贴完整出站 JSON --------------------------------------------------
+reset_files
+
+raw='{"tag":"raw-unlock","protocol":"http","settings":{"servers":[{"address":"r.example.com","port":8080,"users":[{"user":"a","pass":"b"}]}]},"streamSettings":{"security":"tls","tlsSettings":{"serverName":"r.example.com","allowInsecure":false}}}'
+outbound_unlock_add_raw "raw-unlock" "$raw" geosite:openai domain:claude.ai \
+    || fail "粘贴 JSON 添加失败"
+assert_json "$outbound"; assert_json "$route"
+
+python3 - "$outbound" "$route" <<'PY' || fail "粘贴 JSON 的写入结果不对"
+import json, sys
+outbounds = json.load(open(sys.argv[1]))
+rules = json.load(open(sys.argv[2]))["rules"]
+tags = [o.get("tag") for o in outbounds]
+assert tags == ["IPv4_out", "IPv6_out", "socks5-unlock", "raw-unlock", "block"], tags
+
+ob = next(o for o in outbounds if o["tag"] == "raw-unlock")
+# 原样写入，不做重建：streamSettings 等字段要一字不差地保留
+assert ob["streamSettings"]["tlsSettings"]["allowInsecure"] is False
+assert ob["settings"]["servers"][0]["port"] == 8080
+
+rule = next(r for r in rules if r.get("ruleTag") == "custom-unlock-raw-unlock")
+assert rule["outboundTag"] == "raw-unlock"
+assert rule["domain"] == ["geosite:openai", "domain:claude.ai"]
+PY
+
+# JSON 里没有 tag 时，用传进来的标签补上
+reset_files
+outbound_unlock_add_raw "no-tag" '{"protocol":"socks","settings":{"servers":[{"address":"n.example.com","port":1080}]}}' geosite:x     || fail "无 tag 的 JSON 应能添加"
+python3 - "$outbound" <<'PY' || fail "未补上 tag"
+import json, sys
+ob = next(o for o in json.load(open(sys.argv[1])) if o.get("tag") == "no-tag")
+assert ob["protocol"] == "socks"
+PY
+
+# JSON 里的 tag 与传进来的不一致：以 JSON 里的为准会让菜单和文件对不上，必须拒绝
+reset_files
+if outbound_unlock_add_raw "mine" '{"tag":"theirs","protocol":"http","settings":{"servers":[{"address":"a.com","port":1}]}}' geosite:x 2>/dev/null; then
+    fail "JSON 里的 tag 与指定标签不一致时必须拒绝"
+fi
+
+# 各种坏 JSON
+reset_files
+before_ob="$(cat "$outbound")"
+for bad in \
+    'not json' \
+    '[]' \
+    '"just a string"' \
+    '{"tag":"x"}' \
+    '{"protocol":"","settings":{}}' \
+    '{"protocol":"http"}' \
+    '{"protocol":"http","settings":{"servers":[]}}' \
+    '{"protocol":"http","settings":{"servers":[{"port":80}]}}' \
+    '{"protocol":"http","settings":{"servers":[{"address":"a.com"}]}}'
+do
+    if outbound_unlock_add_raw "bad-$RANDOM" "$bad" geosite:x 2>/dev/null; then
+        fail "坏 JSON 应被拒绝：${bad}"
+    fi
+done
+[[ "$(cat "$outbound")" == "$before_ob" ]] || fail "坏 JSON 不该改动文件"
+
+# 保留标签与重名同样适用
+reset_files
+if outbound_unlock_add_raw "block" '{"protocol":"http","settings":{"servers":[{"address":"a.com","port":1}]}}' geosite:x 2>/dev/null; then
+    fail "保留标签必须被拒绝"
+fi
+outbound_unlock_add_raw "dup" '{"protocol":"http","settings":{"servers":[{"address":"a.com","port":1}]}}' geosite:x     || fail "准备用例失败"
+if outbound_unlock_add_raw "dup" '{"protocol":"http","settings":{"servers":[{"address":"a.com","port":1}]}}' geosite:x 2>/dev/null; then
+    fail "重名标签必须被拒绝"
+fi
+
+# 域名条目照样要校验
+reset_files
+if outbound_unlock_add_raw "d" '{"protocol":"http","settings":{"servers":[{"address":"a.com","port":1}]}}' "bad entry" 2>/dev/null; then
+    fail "非法域名条目必须被拒绝"
+fi
+if outbound_unlock_add_raw "d" '{"protocol":"http","settings":{"servers":[{"address":"a.com","port":1}]}}' 2>/dev/null; then
+    fail "没有域名条目必须被拒绝"
+fi
+
+# --- 12b. 多行 JSON 读取：提示语不能混进返回值 ------------------------------
+# 这个函数是在 $( ) 里被调用的，提示语要是打到 stdout 就会被一起捕获、混进 JSON。
+declare -F outbound_unlock_read_json_block >/dev/null \
+    || fail "outbound_unlock.sh 未定义 outbound_unlock_read_json_block"
+got="$(printf '{\n  "protocol": "http"\n}\n\n' | outbound_unlock_read_json_block 2>/dev/null)"
+[[ "$got" == '{
+  "protocol": "http"
+}' ]] || fail "读到的 JSON 不干净：[${got}]"
+python3 -c "import json,sys; json.loads(sys.argv[1])" "$got" \
+    || fail "读到的内容不是合法 JSON"
+
+# --- 13. 接线 ---------------------------------------------------------------
 python3 - "$repo_dir" <<'WIRING' || fail "N2X.sh / install.sh 未正确接入 outbound_unlock.sh"
 from pathlib import Path
 import sys

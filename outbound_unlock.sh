@@ -109,7 +109,141 @@ def outbound_insert_index(outbounds):
     return index
 
 
+# 粘贴代理链接用。scheme 决定协议和要不要 TLS：
+#   http   -> http 出站，明文
+#   https  -> http 出站 + TLS
+#   socks / socks5 / socks5h -> socks 出站，明文
+# socks5h 的区别只是 DNS 由代理端解析，而 xray 的 socks 出站本来就把域名发给代理，
+# 所以和 socks5 同等对待。
+URL_SCHEMES = {
+    "http": ("http", "0", 80),
+    "https": ("http", "1", 443),
+    "socks": ("socks", "0", 1080),
+    "socks5": ("socks", "0", 1080),
+    "socks5h": ("socks", "0", 1080),
+}
+
+KNOWN_PROTOCOLS = {
+    "http", "socks", "vmess", "vless", "trojan", "shadowsocks",
+    "freedom", "blackhole", "dns", "wireguard", "loopback",
+}
+
 mode = sys.argv[1]
+
+if mode == "parseurl":
+    from urllib.parse import urlsplit, unquote
+
+    raw = sys.argv[2].strip()
+    if "://" not in raw:
+        sys.stderr.write("不是代理链接，缺少 scheme://\n")
+        sys.exit(2)
+    scheme = raw.split("://", 1)[0].lower()
+    if scheme not in URL_SCHEMES:
+        sys.stderr.write("不支持的协议：%s（可用：http https socks socks5 socks5h）\n" % scheme)
+        sys.exit(2)
+    protocol, tls, default_port = URL_SCHEMES[scheme]
+    try:
+        parts = urlsplit(raw)
+        host = parts.hostname          # 已自动脱掉 IPv6 的方括号
+        port = parts.port              # 端口非法时这里会抛
+    except Exception as exc:
+        sys.stderr.write("链接解析失败：%s\n" % exc)
+        sys.exit(2)
+    if not host:
+        sys.stderr.write("链接里没有主机名\n")
+        sys.exit(2)
+    if port is None:
+        port = default_port
+    if not (1 <= port <= 65535):
+        sys.stderr.write("端口越界：%s\n" % port)
+        sys.exit(2)
+    user = unquote(parts.username or "")
+    password = unquote(parts.password or "")
+    if user and not password:
+        sys.stderr.write("链接里有用户名但没有密码\n")
+        sys.exit(2)
+    sys.stdout.write("\t".join([protocol, host, str(port), user, password, tls]) + "\n")
+    sys.exit(0)
+
+if mode == "addraw":
+    ob_path, rt_path, tag, raw = sys.argv[2:6]
+    domains = sys.argv[6:]
+
+    try:
+        new_outbound = json.loads(raw)
+    except Exception as exc:
+        sys.stderr.write("粘贴的内容不是合法 JSON：%s\n" % exc)
+        sys.exit(2)
+    if not isinstance(new_outbound, dict):
+        sys.stderr.write("粘贴的内容必须是一个 { } 对象，而不是数组或标量\n")
+        sys.exit(2)
+
+    # tag：JSON 里没有就补上；有但和指定的不一致就拒绝——不然菜单显示的标签和文件
+    # 里的对不上，后续按标签查找会全乱。
+    raw_tag = new_outbound.get("tag")
+    if raw_tag is not None and raw_tag != tag:
+        sys.stderr.write("JSON 里的 tag 是 %r，与指定的 %r 不一致\n" % (raw_tag, tag))
+        sys.exit(2)
+    new_outbound["tag"] = tag
+
+    protocol = new_outbound.get("protocol")
+    if not isinstance(protocol, str) or not protocol:
+        sys.stderr.write("JSON 里缺少 protocol\n")
+        sys.exit(2)
+    if protocol not in KNOWN_PROTOCOLS:
+        sys.stderr.write("警告：protocol=%s 不在已知列表里，请确认 xray 认识它\n" % protocol)
+
+    # 代理类出站必须有能连的服务器，否则写进去只会让 xray 启动即 panic。
+    if protocol in ("http", "socks"):
+        servers = (new_outbound.get("settings") or {}).get("servers")
+        if not isinstance(servers, list) or not servers:
+            sys.stderr.write("JSON 里缺少 settings.servers\n")
+            sys.exit(2)
+        first = servers[0]
+        if not isinstance(first, dict) or not first.get("address"):
+            sys.stderr.write("settings.servers[0] 里缺少 address\n")
+            sys.exit(2)
+        if not isinstance(first.get("port"), int):
+            sys.stderr.write("settings.servers[0].port 缺失或不是数字\n")
+            sys.exit(2)
+
+    try:
+        outbounds = load(ob_path)
+    except Exception as exc:
+        sys.stderr.write("custom_outbound.json 解析失败：%s\n" % exc)
+        sys.exit(2)
+    if not isinstance(outbounds, list):
+        sys.stderr.write("custom_outbound.json 顶层必须是数组\n")
+        sys.exit(2)
+    try:
+        route = load(rt_path)
+    except Exception as exc:
+        sys.stderr.write("route.json 解析失败：%s\n" % exc)
+        sys.exit(2)
+    if not isinstance(route.get("rules"), list):
+        sys.stderr.write("route.json 里没有 rules 数组\n")
+        sys.exit(2)
+    if any(ob.get("tag") == tag for ob in outbounds):
+        sys.stderr.write("出站标签已存在：%s\n" % tag)
+        sys.exit(2)
+
+    new_rule = {
+        "type": "field",
+        "ruleTag": "%s-%s" % (RULE_PREFIX, tag),
+        "outboundTag": tag,
+        "domain": list(domains),
+    }
+    outbounds.insert(outbound_insert_index(outbounds), new_outbound)
+    rules = route["rules"]
+    route["rules"] = (rules[:rule_insert_index(rules)] + [new_rule]
+                      + rules[rule_insert_index(rules):])
+    write_atomic(ob_path, outbounds)
+    try:
+        write_atomic(rt_path, route)
+    except Exception as exc:
+        sys.stderr.write("写入 route.json 失败：%s\n" % exc)
+        sys.exit(2)
+    sys.exit(0)
 
 if mode == "tags":
     try:
@@ -418,6 +552,58 @@ outbound_unlock_add() {
     return 0
 }
 
+# 解析粘贴的代理链接，成功时按 TAB 输出：
+#   protocol<TAB>address<TAB>port<TAB>user<TAB>pass<TAB>tls
+# 纯函数，不碰文件；交互层拿到之后照样走 outbound_unlock_add 的校验。
+outbound_unlock_parse_url() {
+    if [[ -z "${1:-}" ]]; then
+        echo -e "${red}链接不能为空。${plain}" >&2
+        return 1
+    fi
+    if ! outbound_unlock_python_bin >/dev/null; then
+        echo -e "${red}未检测到 python3/python，无法解析链接。${plain}" >&2
+        return 1
+    fi
+    outbound_unlock_py parseurl "$1" || return 1
+    return 0
+}
+
+# outbound_unlock_add_raw <tag> <出站 JSON 字符串> <domain>...
+# 原样写入粘贴来的出站对象，不做重建——streamSettings、mux 这些字段一字不差地保留。
+outbound_unlock_add_raw() {
+    local tag="$1" raw="$2"
+    shift 2
+    local ob rt entry
+
+    if [[ $# -eq 0 ]]; then
+        echo -e "${red}至少要有一个解锁域名条目。${plain}" >&2
+        return 1
+    fi
+
+    ob="$(outbound_unlock_outbound_path)"
+    rt="$(outbound_unlock_route_path)"
+
+    if ! outbound_unlock_python_bin >/dev/null; then
+        echo -e "${red}未检测到 python3/python，无法安全地修改 JSON 配置。${plain}" >&2
+        return 1
+    fi
+    for entry in "$ob" "$rt"; do
+        if [[ ! -f "$entry" ]]; then
+            echo -e "${red}未找到 ${entry}。${plain}" >&2
+            echo -e "${yellow}请先使用「生成 N2X 配置文件」创建初始配置。${plain}" >&2
+            return 1
+        fi
+    done
+
+    outbound_unlock_validate_tag "$tag" || return 1
+    for entry in "$@"; do
+        outbound_unlock_validate_domain_entry "$entry" || return 1
+    done
+
+    outbound_unlock_py addraw "$ob" "$rt" "$tag" "$raw" "$@" || return 1
+    return 0
+}
+
 # 清除 = 把两个文件恢复成 config_gen.sh 里的默认内容。备份先行，因为这会连带抹掉
 # 用户在这两个文件里做过的任何手改，不只是解锁配置。
 outbound_unlock_clear() {
@@ -501,9 +687,193 @@ outbound_unlock_prompt() {
     done
 }
 
-outbound_unlock_add_interactive() {
+# 逐条读域名条目，空行结束。校验不过的当场提示并重来，不计入。
+# 结果放进调用方声明的数组 OUTBOUND_UNLOCK_DOMAINS。
+outbound_unlock_read_domains() {
+    local entry
+    OUTBOUND_UNLOCK_DOMAINS=()
+    echo -e "\n${yellow}逐条输入要走这个出站的域名，每输入一条回车，空行结束。${plain}"
+    echo -e "${yellow}写法：geosite:openai、domain:openai.com、full:chat.openai.com、regexp:.*openai.*，或直接 openai.com${plain}"
+    while true; do
+        read -rp "  域名条目 #$(( ${#OUTBOUND_UNLOCK_DOMAINS[@]} + 1 ))（空行结束）: " entry
+        [[ -z "$entry" ]] && break
+        if outbound_unlock_validate_domain_entry "$entry"; then
+            OUTBOUND_UNLOCK_DOMAINS+=("$entry")
+        fi
+    done
+}
+
+# 读一段多行 JSON：粘贴完按空行结束。原样返回，合法性交给 add_raw 校验。
+#
+# 提示语必须走 stderr：整个函数是在 $( ) 里被调用的，打到 stdout 会被一起捕获
+# 进返回值，混进 JSON 里。
+outbound_unlock_read_json_block() {
+    local line buffer=""
+    echo -e "\n${yellow}粘贴完整的出站 JSON（一个 { } 对象），粘完后按一次回车再按一次空回车结束：${plain}" >&2
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && break
+        buffer+="$line"$'\n'
+    done
+    printf '%s' "$buffer"
+}
+
+# 方式 2：粘贴代理链接。解析出字段后仍走 outbound_unlock_add 的完整校验。
+outbound_unlock_add_from_url() {
+    local url tag parsed proto addr port user pass tls answer
+
+    outbound_unlock_prompt url "粘贴代理链接（socks5://user:pass@host:port 或 http(s)://...）" "" \
+        "" || return 1
+    if ! parsed="$(outbound_unlock_parse_url "$url")"; then
+        return 1
+    fi
+    IFS=$'\t' read -r proto addr port user pass tls <<< "$parsed"
+
+    echo -e "${green}已从链接解析出：${plain}"
+    echo "  协议    ${proto}$([[ "$tls" == 1 ]] && echo "（含 TLS）")"
+    echo "  服务器  ${addr}:${port}"
+    if [[ -n "$user" ]]; then
+        echo "  账号    ${user} / ${pass}"
+    else
+        echo "  账号    （无）"
+    fi
+
+    outbound_unlock_prompt tag "出站标签（英文）" "" outbound_unlock_validate_tag || return 1
+
+    outbound_unlock_read_domains
+    if [[ ${#OUTBOUND_UNLOCK_DOMAINS[@]} -eq 0 ]]; then
+        echo -e "${red}一个域名条目都没有，本条放弃。${plain}"
+        return 1
+    fi
+
+    read -rp "$(echo -e "确认写入？[Y/n]: ")" answer
+    if [[ "$answer" == "n" || "$answer" == "N" ]]; then
+        echo -e "${yellow}已放弃本条。${plain}"
+        return 1
+    fi
+    if outbound_unlock_add "$tag" "$proto" "$addr" "$port" "$user" "$pass" \
+            "$tls" "" 0 "${OUTBOUND_UNLOCK_DOMAINS[@]}"; then
+        echo -e "${green}已添加：${tag}${plain}"
+        outbound_unlock_restart_hint
+        return 0
+    fi
+    echo -e "${red}添加失败，两个配置文件都未改动。${plain}"
+    return 1
+}
+
+# 方式 3：粘贴完整出站 JSON，原样写入。
+outbound_unlock_add_from_json() {
+    local raw tag answer
+
+    raw="$(outbound_unlock_read_json_block)"
+    if [[ -z "${raw//[[:space:]]/}" ]]; then
+        echo -e "${red}没有读到任何内容。${plain}"
+        return 1
+    fi
+
+    outbound_unlock_prompt tag "出站标签（英文；JSON 里已有 tag 就填相同的）" "" \
+        outbound_unlock_validate_tag || return 1
+
+    outbound_unlock_read_domains
+    if [[ ${#OUTBOUND_UNLOCK_DOMAINS[@]} -eq 0 ]]; then
+        echo -e "${red}一个域名条目都没有，本条放弃。${plain}"
+        return 1
+    fi
+
+    read -rp "$(echo -e "确认写入？[Y/n]: ")" answer
+    if [[ "$answer" == "n" || "$answer" == "N" ]]; then
+        echo -e "${yellow}已放弃本条。${plain}"
+        return 1
+    fi
+    if outbound_unlock_add_raw "$tag" "$raw" "${OUTBOUND_UNLOCK_DOMAINS[@]}"; then
+        echo -e "${green}已添加：${tag}${plain}"
+        outbound_unlock_restart_hint
+        return 0
+    fi
+    echo -e "${red}添加失败，两个配置文件都未改动。${plain}"
+    return 1
+}
+
+# 方式 1：逐项输入。
+outbound_unlock_add_by_fields() {
     local tag protocol address port user password use_tls server_name allow_insecure
-    local answer entry domains
+    local answer
+
+    outbound_unlock_prompt tag "出站标签（英文，如 http-unlock）" "" \
+        outbound_unlock_validate_tag || return 1
+    outbound_unlock_prompt protocol "协议（http / socks）" "http" \
+        outbound_unlock_validate_protocol || return 1
+    outbound_unlock_prompt address "服务器地址（域名或 IP）" "" \
+        outbound_unlock_validate_address || return 1
+    outbound_unlock_prompt port "端口" "" outbound_unlock_validate_port || return 1
+    outbound_unlock_prompt user "用户名（没有就直接回车）" "" "" || return 1
+    if [[ -n "$user" ]]; then
+        outbound_unlock_prompt password "密码" "" "" || return 1
+        if [[ -z "$password" ]]; then
+            echo -e "${red}填了用户名就必须填密码，本条放弃。${plain}"
+            return 1
+        fi
+    else
+        password=""
+    fi
+
+    read -rp "$(echo -e "是否启用 TLS？[y/N]: ")" answer
+    if [[ "$answer" == "y" || "$answer" == "Y" ]]; then
+        use_tls=1
+        outbound_unlock_prompt server_name "TLS SNI" "$address" \
+            outbound_unlock_validate_address || return 1
+        read -rp "$(echo -e "是否允许不安全证书 allowInsecure？[y/N]: ")" answer
+        if [[ "$answer" == "y" || "$answer" == "Y" ]]; then
+            allow_insecure=1
+        else
+            allow_insecure=0
+        fi
+    else
+        use_tls=0
+        server_name=""
+        allow_insecure=0
+    fi
+
+
+    outbound_unlock_read_domains
+    if [[ ${#OUTBOUND_UNLOCK_DOMAINS[@]} -eq 0 ]]; then
+        echo -e "${red}一个域名条目都没有，本条放弃。${plain}"
+        return 1
+    fi
+
+    echo -e "\n${green}即将写入：${plain}"
+    echo "  标签    ${tag}"
+    echo "  协议    ${protocol}"
+    echo "  服务器  ${address}:${port}"
+    if [[ -n "$user" ]]; then
+        echo "  账号    ${user} / ${password}"
+    else
+        echo "  账号    （无）"
+    fi
+    if [[ "$use_tls" == "1" ]]; then
+        echo "  TLS     开启，SNI=${server_name:-$address}，allowInsecure=$([[ "$allow_insecure" == 1 ]] && echo true || echo false)"
+    else
+        echo "  TLS     关闭"
+    fi
+    printf '  域名    %s\n' "${OUTBOUND_UNLOCK_DOMAINS[@]}"
+    read -rp "$(echo -e "确认写入？[Y/n]: ")" answer
+    if [[ "$answer" == "n" || "$answer" == "N" ]]; then
+        echo -e "${yellow}已放弃本条。${plain}"
+        return 1
+    fi
+    if outbound_unlock_add "$tag" "$protocol" "$address" "$port" "$user" \
+            "$password" "$use_tls" "$server_name" "$allow_insecure" \
+            "${OUTBOUND_UNLOCK_DOMAINS[@]}"; then
+        echo -e "${green}已添加：${tag}${plain}"
+        outbound_unlock_restart_hint
+        return 0
+    fi
+    echo -e "${red}添加失败，两个配置文件都未改动。${plain}"
+    return 1
+}
+
+# 三种录入方式的外壳：选方式 -> 录一条 -> 问是否继续。
+outbound_unlock_add_interactive() {
+    local answer way
 
     if [[ ! -f "$(outbound_unlock_outbound_path)" || ! -f "$(outbound_unlock_route_path)" ]]; then
         echo -e "${red}未找到 custom_outbound.json 或 route.json。${plain}"
@@ -512,83 +882,19 @@ outbound_unlock_add_interactive() {
     fi
 
     while true; do
-        domains=()
         echo -e "\n${green}添加一条自定义解锁出站${plain}（任意一步输入 q 放弃本条）"
-        echo "------------------------------------------"
-
-        outbound_unlock_prompt tag "出站标签（英文，如 http-unlock）" "" \
-            outbound_unlock_validate_tag || return 0
-        outbound_unlock_prompt protocol "协议（http / socks）" "http" \
-            outbound_unlock_validate_protocol || return 0
-        outbound_unlock_prompt address "服务器地址（域名或 IP）" "" \
-            outbound_unlock_validate_address || return 0
-        outbound_unlock_prompt port "端口" "" outbound_unlock_validate_port || return 0
-        outbound_unlock_prompt user "用户名（没有就直接回车）" "" "" || return 0
-        if [[ -n "$user" ]]; then
-            outbound_unlock_prompt password "密码" "" "" || return 0
-            if [[ -z "$password" ]]; then
-                echo -e "${red}填了用户名就必须填密码，本条放弃。${plain}"
-                return 0
-            fi
-        else
-            password=""
-        fi
-
-        read -rp "$(echo -e "是否启用 TLS？[y/N]: ")" answer
-        if [[ "$answer" == "y" || "$answer" == "Y" ]]; then
-            use_tls=1
-            outbound_unlock_prompt server_name "TLS SNI" "$address" \
-                outbound_unlock_validate_address || return 0
-            read -rp "$(echo -e "是否允许不安全证书 allowInsecure？[y/N]: ")" answer
-            if [[ "$answer" == "y" || "$answer" == "Y" ]]; then
-                allow_insecure=1
-            else
-                allow_insecure=0
-            fi
-        else
-            use_tls=0
-            server_name=""
-            allow_insecure=0
-        fi
-
-        echo -e "\n${yellow}逐条输入要走这个出站的域名，每输入一条回车，空行结束。${plain}"
-        echo -e "${yellow}写法：geosite:openai、domain:openai.com、full:chat.openai.com、regexp:.*openai.*，或直接 openai.com${plain}"
-        while true; do
-            read -rp "  域名条目 #$(( ${#domains[@]} + 1 ))（空行结束）: " entry
-            [[ -z "$entry" ]] && break
-            if outbound_unlock_validate_domain_entry "$entry"; then
-                domains+=("$entry")
-            fi
-        done
-        if [[ ${#domains[@]} -eq 0 ]]; then
-            echo -e "${red}一个域名条目都没有，本条放弃。${plain}"
-        else
-            echo -e "\n${green}即将写入：${plain}"
-            echo "  标签    ${tag}"
-            echo "  协议    ${protocol}"
-            echo "  服务器  ${address}:${port}"
-            if [[ -n "$user" ]]; then
-                echo "  账号    ${user} / ${password}"
-            else
-                echo "  账号    （无）"
-            fi
-            if [[ "$use_tls" == "1" ]]; then
-                echo "  TLS     开启，SNI=${server_name:-$address}，allowInsecure=$([[ "$allow_insecure" == 1 ]] && echo true || echo false)"
-            else
-                echo "  TLS     关闭"
-            fi
-            printf '  域名    %s\n' "${domains[@]}"
-            read -rp "$(echo -e "确认写入？[Y/n]: ")" answer
-            if [[ "$answer" == "n" || "$answer" == "N" ]]; then
-                echo -e "${yellow}已放弃本条。${plain}"
-            elif outbound_unlock_add "$tag" "$protocol" "$address" "$port" "$user" \
-                    "$password" "$use_tls" "$server_name" "$allow_insecure" "${domains[@]}"; then
-                echo -e "${green}已添加：${tag}${plain}"
-                outbound_unlock_restart_hint
-            else
-                echo -e "${red}添加失败，两个配置文件都未改动。${plain}"
-            fi
-        fi
+        echo "————————————————"
+        echo -e "  ${green}1.${plain} 逐项输入（默认）"
+        echo -e "  ${green}2.${plain} 粘贴代理链接（socks5:// / socks5h:// / http:// / https://）"
+        echo -e "  ${green}3.${plain} 粘贴完整出站 JSON（{ ... }）"
+        echo "————————————————"
+        read -rp "请选择录入方式 [1-3，默认 1]: " way
+        case "${way:-1}" in
+            1) outbound_unlock_add_by_fields ;;
+            2) outbound_unlock_add_from_url ;;
+            3) outbound_unlock_add_from_json ;;
+            *) echo -e "${red}请输入 1、2 或 3。${plain}"; continue ;;
+        esac
 
         read -rp "$(echo -e "\n继续添加下一条？[Y/n]: ")" answer
         [[ "$answer" == "n" || "$answer" == "N" ]] && break
