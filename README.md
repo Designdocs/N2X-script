@@ -118,6 +118,77 @@ N2X download off domain
 `tests/download_block_migrate_test.sh` 覆盖迁移、幂等、部分迁移、已关分组不回填、
 无关配置不动、缺失/损坏处理以及升级流程接线。
 
+## 出口解锁设置
+
+菜单 `21. 出口解锁设置`，或 `N2X unlock add|list|clear`。交互式录入一条 http/socks 代理
+出站，同时把指定域名的路由指过去；一条录完问「继续添加下一条？」，可以连着加。
+
+一条配置同时改两个文件：
+
+```jsonc
+// custom_outbound.json —— 插在 IPv4_out / IPv6_out 之前
+{
+    "tag": "http-unlock",
+    "protocol": "http",
+    "settings": { "servers": [{ "address": "abc.decodo.com", "port": 10003,
+                                "users": [{ "user": "...", "pass": "..." }] }] },
+    "streamSettings": { "security": "tls",
+                        "tlsSettings": { "serverName": "abc.decodo.com",
+                                         "allowInsecure": false } }
+}
+
+// route.json —— 插在末尾兜底规则之前
+{
+    "type": "field",
+    "ruleTag": "custom-unlock-http-unlock",
+    "outboundTag": "http-unlock",
+    "domain": ["geosite:anthropic", "geosite:openai", "geosite:google-deepmind"]
+}
+```
+
+没填账号就不写 `users`，没开 TLS 就不写 `streamSettings`，不留空壳字段。
+
+### 录入时的校验
+
+| 项 | 规则 |
+| --- | --- |
+| 标签 | `[A-Za-z0-9][A-Za-z0-9_.-]*`，不能撞 `IPv4_out`/`IPv6_out`/`block`/`socks5-unlock`，也不能和已有的重名 |
+| 协议 | 只收 `http` / `socks`（xray 里 socks5 的协议名就是 `socks`） |
+| 地址 | 域名、IPv4 或 IPv6，不接受带 `://`、端口或空格的写法 |
+| 端口 | 1-65535 的纯数字，写进 JSON 时是数字不是字符串 |
+| 账号密码 | 要么都填要么都不填 |
+| 域名条目 | `geosite:` / `domain:` / `full:` / `regexp:` / `ext:` 前缀，或裸域名；至少一条 |
+
+校验不过会当场重问那一项，不会把半截配置写进去。密码里的引号、反斜杠交给 json 库转义，
+不拼字符串。
+
+### 位置与生效
+
+`route.json` 的规则插在**第一条无匹配条件的兜底规则之前**——插在兜底之后永远匹配不到。
+
+`custom_outbound.json` 的出站按要求插在 `IPv4_out` / `IPv6_out` **之前**。需要知道的是：
+路由是靠 `outboundTag` 找出站的，出站顺序不影响规则是否生效；顺序唯一的作用是
+**列表第一条会成为默认出站**（`app/proxyman/outbound` 里 `AddHandler` 把第一个注册的
+handler 存为 `defaultHandler`）。默认 `route.json` 最后一条 `network: udp,tcp` 的兜底规则
+会兜住所有连接，默认出站实际用不上；但如果谁把那条兜底删了，未命中任何规则的流量就会
+走这里的解锁出站而不是直连。
+
+两个文件同成同败：全程在内存里改、两边都校验通过才落盘，任一步失败两个文件都不动。
+
+### 清除自定义
+
+`N2X unlock clear`（菜单 3）把两个文件恢复成 `config_gen.sh` 里的默认内容。这不只是删解锁
+配置——**你在这两个文件里做过的任何手改都会一并消失**（`socks5-unlock` 里填过的账号、自己
+加的路由规则等）。所以：
+
+- 需要输入大写 `YES` 才执行
+- 执行前各备份一份 `.bak.<时间戳>` 到同目录
+- **下载拦截两组的开关状态会被保留**：恢复默认会把三条 BT 规则写回开启态，这里会先记下
+  原状态、恢复完再按原样关回去，不会因为清理解锁配置就把你关掉的拦截又打开
+
+`tests/outbound_unlock_test.sh` 覆盖校验、写入位置、TLS/无 TLS、无账号、标签冲突、
+失败不写、两文件同成同败、清除与备份、下载拦截状态保留以及菜单接线。
+
 ## 最小诱饵 Web 服务
 
 N2X 安装和升级会部署一个独立的本地 Web companion。它使用同一份 N2X 二进制，仅监听 loopback，不占用节点公网端口，也不依赖 Caddy 或 Nginx。

@@ -255,13 +255,20 @@ assert "source /usr/local/N2X/download_block.sh" in n2x, "N2X.sh 缺少已安装
 
 assert "20.${plain} 下载拦截管理" in n2x, "主菜单没有下载拦截入口"
 assert "20) download_block_menu ;;" in n2x, "主菜单 20 未接到 download_block_menu"
-assert "21) exit ;;" in n2x, "退出项应顺延到 21"
-assert "[0-21]" in n2x and "[0-20]" not in n2x, "菜单编号范围未同步更新"
+# 退出项的编号会随着新菜单往后挪，这里只钉住"下载拦截在 20 且退出排在它后面"。
+assert "21) outbound_unlock_menu ;;" in n2x or "21) exit ;;" in n2x, \
+    "20 之后的菜单项接线断了"
+assert "[0-20]" not in n2x, "菜单编号范围未同步更新"
 
 assert "download_block_command" in n2x, "缺少 N2X download 子命令"
 
-# 只更新壳会让新菜单调到旧模块，升级时必须一起拉。
-assert "config_append.sh download_block.sh; do" in n2x, "update_shell 未一并更新 download_block.sh"
+# 只更新壳会让新菜单调到旧模块，升级时必须一起拉。模块列表还会继续加东西，
+# 所以解析出那一行再看，不钉死相邻的模块名。
+import re
+modules = re.search(r"for module in ([^;]+); do", n2x)
+assert modules, "update_shell 里找不到模块列表"
+assert "download_block.sh" in modules.group(1).split(), \
+    "update_shell 未一并更新 download_block.sh"
 
 assert "/usr/local/N2X/download_block.sh" in install, "install.sh 未安装 download_block.sh"
 assert "chmod +x /usr/local/N2X/download_block.sh" in install, "install.sh 未给模块加执行位"

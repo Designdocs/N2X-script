@@ -572,12 +572,18 @@ install_support_scripts() {
         "/usr/local/N2X/download_block.sh" \
         "https://raw.githubusercontent.com/Designdocs/N2X-script/main/download_block.sh" || return 1
 
+    install_managed_shell_file \
+        "outbound_unlock.sh" \
+        "/usr/local/N2X/outbound_unlock.sh" \
+        "https://raw.githubusercontent.com/Designdocs/N2X-script/main/outbound_unlock.sh" || return 1
+
     chmod +x /usr/bin/N2X || return 1
     chmod +x /usr/local/N2X/render_config.sh >/dev/null 2>&1 || return 1
     chmod +x /usr/local/N2X/config_gen.sh >/dev/null 2>&1 || return 1
     chmod +x /usr/local/N2X/config_append.sh >/dev/null 2>&1 || return 1
     chmod +x /usr/local/N2X/artx_decoy.sh >/dev/null 2>&1 || return 1
     chmod +x /usr/local/N2X/download_block.sh >/dev/null 2>&1 || return 1
+    chmod +x /usr/local/N2X/outbound_unlock.sh >/dev/null 2>&1 || return 1
     return 0
 }
 
