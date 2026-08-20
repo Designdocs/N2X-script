@@ -410,7 +410,7 @@ write_default_route_json() {
             "domain": [
                 "regexp:(^|[.])(api|ps|sv|offnavi|newvector|ulog[.]imap|newloc)([.]map|)[.](baidu|n[.]shifen)[.]com",
                 "regexp:(^|[.])(360|so)[.](cn|com)",
-                "regexp:(^|[^a-zA-Z]|bit|u)torrent",
+                "regexp:(^|[.])(bittorrent|utorrent)([.]|$)",
                 "regexp:(^|[.])(guerrillamail|guerrillamailblock|sharklasers|grr|pokemail|spam4|bccto|chacuo|027168)[.](info|biz|com|de|net|org|me|la)",
                 "regexp:(^|[.])(xunlei|sandai)",
                 "regexp:(^|[.])(dafahao|mingjinglive|botanwang|minghui|dongtaiwang|falunaz|epochtimes|ntdtv|falundafa|falungong|wujieliulan|zhengjian)[.](org|com|net)",
