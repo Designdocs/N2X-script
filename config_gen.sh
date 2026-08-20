@@ -410,11 +410,8 @@ write_default_route_json() {
             "domain": [
                 "regexp:(^|[.])(api|ps|sv|offnavi|newvector|ulog[.]imap|newloc)([.]map|)[.](baidu|n[.]shifen)[.]com",
                 "regexp:(^|[.])(360|so)[.](cn|com)",
-                "regexp:(^|[.])(bittorrent|utorrent)([.]|$)",
                 "regexp:(^|[.])(guerrillamail|guerrillamailblock|sharklasers|grr|pokemail|spam4|bccto|chacuo|027168)[.](info|biz|com|de|net|org|me|la)",
-                "regexp:(^|[.])(xunlei|sandai)",
                 "regexp:(^|[.])(dafahao|mingjinglive|botanwang|minghui|dongtaiwang|falunaz|epochtimes|ntdtv|falundafa|falungong|wujieliulan|zhengjian)[.](org|com|net)",
-                "regexp:(^|[.])(ed2k|announce)([.]|$)",
                 "regexp:(^|[.])(360)[.](cn|com|net)",
                 "regexp:(^|[.])(guanjia[.]qq[.]com|qqpcmgr)",
                 "regexp:(^|[.])(rising|kingsoft|duba|xindubawukong|jinshanduba)[.](com|net|org)",
@@ -444,6 +441,17 @@ write_default_route_json() {
         },
         {
             "type": "field",
+            "ruleTag": "download-block-domain",
+            "outboundTag": "block",
+            "domain": [
+                "regexp:(^|[.])(bittorrent|utorrent)([.]|$)",
+                "regexp:(^|[.])(xunlei|sandai)",
+                "regexp:(^|[.])(ed2k|announce)([.]|$)"
+            ]
+        },
+        {
+            "type": "field",
+            "ruleTag": "download-block-protocol",
             "outboundTag": "block",
             "protocol": [
                 "bittorrent"
@@ -451,6 +459,7 @@ write_default_route_json() {
         },
         {
             "type": "field",
+            "ruleTag": "download-block-port",
             "outboundTag": "block",
             "network": "tcp,udp",
             "port": "6881-6889,6969,2710,51413"

@@ -567,11 +567,17 @@ install_support_scripts() {
         "/usr/local/N2X/artx_decoy.sh" \
         "https://raw.githubusercontent.com/Designdocs/N2X-script/main/artx_decoy.sh" || return 1
 
+    install_managed_shell_file \
+        "download_block.sh" \
+        "/usr/local/N2X/download_block.sh" \
+        "https://raw.githubusercontent.com/Designdocs/N2X-script/main/download_block.sh" || return 1
+
     chmod +x /usr/bin/N2X || return 1
     chmod +x /usr/local/N2X/render_config.sh >/dev/null 2>&1 || return 1
     chmod +x /usr/local/N2X/config_gen.sh >/dev/null 2>&1 || return 1
     chmod +x /usr/local/N2X/config_append.sh >/dev/null 2>&1 || return 1
     chmod +x /usr/local/N2X/artx_decoy.sh >/dev/null 2>&1 || return 1
+    chmod +x /usr/local/N2X/download_block.sh >/dev/null 2>&1 || return 1
     return 0
 }
 
@@ -624,6 +630,31 @@ install_xray_side_files() {
             return 1
         fi
     done
+    return 0
+}
+
+# 升级用的一次性迁移：老机器的 route.json 是在 ruleTag 之前生成的，里面的 BT 规则
+# 没有标记，分组开关认不出来。install_xray_side_files 只在文件缺失时写入（升级时用
+# 户改过的内容要原样保留），所以这块只能靠迁移补。幂等，每次升级都跑没有副作用。
+#
+# 不 die：迁移失败只是分组开关暂时用不了，不该拦住整个安装。
+run_download_block_migration() {
+    local module="${1:-/usr/local/N2X/download_block.sh}"
+
+    [[ -f "$module" ]] || return 0
+
+    # shellcheck source=/usr/local/N2X/download_block.sh
+    if ! source "$module"; then
+        log_warn "加载 ${module} 失败，跳过下载拦截标记迁移。"
+        return 0
+    fi
+    if ! declare -F download_block_migrate >/dev/null; then
+        return 0
+    fi
+    if ! download_block_migrate; then
+        log_warn "route.json 的下载拦截标记迁移失败，配置未被改动。"
+        log_warn "可稍后执行 N2X download status 查看，或手动检查 /etc/N2X/route.json。"
+    fi
     return 0
 }
 
@@ -1423,6 +1454,9 @@ EOF
         log_error "xray 配套文件（dns.json / custom_outbound.json / route.json）未能全部写入 /etc/N2X/。"
         log_error "使用 xray 核心时缺这些文件会导致核心启动即 panic，请修复后执行：N2X generate"
     fi
+
+    # 配套文件就位之后再迁移：老配置里的 BT 规则要补上 ruleTag，分组开关才认得出。
+    run_download_block_migration
 
     # Cron: weekly geodata sync (Sat 04:00) and monthly update (1st 04:30)
     ensure_cron_job "0 4 * * 6" "/usr/bin/N2X update geodata -r >/var/log/N2X-geodata.log 2>&1"

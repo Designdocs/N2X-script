@@ -28,6 +28,11 @@ if [[ -f "$SCRIPT_DIR/artx_decoy.sh" ]]; then
 elif [[ -f /usr/local/N2X/artx_decoy.sh ]]; then
     source /usr/local/N2X/artx_decoy.sh
 fi
+if [[ -f "$SCRIPT_DIR/download_block.sh" ]]; then
+    source "$SCRIPT_DIR/download_block.sh"
+elif [[ -f /usr/local/N2X/download_block.sh ]]; then
+    source /usr/local/N2X/download_block.sh
+fi
 
 # check root
 [[ $EUID -ne 0 ]] && echo -e "${red}错误: ${plain} 必须使用root用户运行此脚本！\n" && exit 1
@@ -1162,7 +1167,7 @@ update_shell() {
         # N2X.sh 只是壳，功能实现在这几个被 source 的文件里；只更新壳会让新菜单
         # 调到不存在的函数，所以一起更新。
         local module
-        for module in artx_decoy.sh config_gen.sh config_append.sh; do
+        for module in artx_decoy.sh config_gen.sh config_append.sh download_block.sh; do
             if ! download_managed_shell_file \
                 "https://raw.githubusercontent.com/Designdocs/N2X-script/main/${module}" \
                 "/usr/local/N2X/${module}"; then
@@ -1171,6 +1176,13 @@ update_shell() {
             fi
             chmod +x "/usr/local/N2X/${module}"
         done
+        # 刚下下来的是新版模块，当前进程里还是启动时 source 的旧版；重新 source 一次
+        # 才能拿到 download_block_migrate，给老 route.json 里的 BT 规则补上 ruleTag。
+        source /usr/local/N2X/config_gen.sh 2>/dev/null || true
+        source /usr/local/N2X/download_block.sh 2>/dev/null || true
+        if declare -F download_block_migrate >/dev/null; then
+            download_block_migrate || echo -e "${yellow}下载拦截标记迁移失败，配置未被改动。${plain}"
+        fi
         echo -e "${green}升级脚本成功，请重新运行脚本${plain}" && exit 0
     fi
 }
@@ -1462,6 +1474,7 @@ show_usage() {
     echo "N2X install      - 安装 N2X"
     echo "N2X uninstall    - 卸载 N2X"
     echo "N2X version      - 查看 N2X 版本"
+    echo "N2X download on|off|status [traffic|domain] - 下载拦截分组启停"
     echo "------------------------------------------"
 }
 
@@ -1493,11 +1506,12 @@ show_menu() {
   ${green}17.${plain} 创建/检测 .env 文件
   ${green}18.${plain} 放行 VPS 的所有网络端口
   ${green}19.${plain} Caddy 443 分流管理
-  ${green}20.${plain} 退出脚本
+  ${green}20.${plain} 下载拦截管理（BT/P2P 启停）
+  ${green}21.${plain} 退出脚本
  "
  #后续更新可加入上方字符串中
     show_status
-    echo && read -rp "请输入选择 [0-20]: " num
+    echo && read -rp "请输入选择 [0-21]: " num
 
     case "${num}" in
         0) config ;;
@@ -1520,8 +1534,9 @@ show_menu() {
         17) manage_env_file ;;
         18) open_ports ;;
         19) caddy_menu ;;
-        20) exit ;;
-        *) echo -e "${red}请输入正确的数字 [0-20]${plain}" ;;
+        20) download_block_menu ;;
+        21) exit ;;
+        *) echo -e "${red}请输入正确的数字 [0-21]${plain}" ;;
     esac
 }
 
@@ -1538,6 +1553,7 @@ if [[ $# > 0 ]]; then
         "env") manage_env_file 0 ;;
         "caddy") caddy_command "${2:-}" ;;
         "decoy") decoy_command "${2:-status}" ;;
+        "download"|"dl") download_block_command "${2:-status}" "${3:-all}" ;;
         "update") check_install 0 && update 0 $2 ;;
         "config") config $* ;;
         "generate") generate_config_file ;;

@@ -56,6 +56,68 @@ xray 配套文件 `dns.json` / `custom_outbound.json` / `route.json` 的默认�
 
 `tests/append_protocol_test.sh` 覆盖上述行为。
 
+## 下载拦截（BT / P2P）启停
+
+菜单 `20. 下载拦截管理`，或命令行 `N2X download on|off|status [traffic|domain]`。
+改的是 `route.json`，改完自动重启 N2X。
+
+分成两组独立开关，因为两者的误伤面完全不同：
+
+| 分组 | ruleTag | 拦什么 | 误伤面 |
+| --- | --- | --- | --- |
+| `traffic` | `download-block-protocol` | 协议嗅探判定为 `bittorrent` 的流量 | 认流量特征，基本不会误伤 |
+| `traffic` | `download-block-port` | BT 常用端口 `6881-6889,6969,2710,51413` | 同上 |
+| `domain` | `download-block-domain` | `bittorrent`/`utorrent`、`xunlei`/`sandai`、`ed2k`/`announce` 域名 | 认域名字样，`torrentmac`、`torrentfreak` 这类资讯/软件站会跟着被拦 |
+
+想放行 torrent 字样的资讯/软件站又要继续拦 BT 流量，就只关 `domain` 组：
+
+```bash
+N2X download off domain
+```
+
+省略分组等同于 `all`，两组一起开关。菜单里 1/2 是切换（显示当前状态），3/4 是两组全开/全关。
+
+不受开关影响、始终生效的：私有网段拦截、广告/风控类域名黑名单、`socks5-unlock` 分流。
+域名黑名单因此拆成两条规则——常规 18 条不可开关，下载类 3 条归 `domain` 组。
+
+关闭时把摘下来的规则原样存到 `/etc/N2X/download-block.disabled.json`（一个数组，两组
+混放，靠 `ruleTag` 区分），重新开启时放回去，所以手动往这几条规则里加过的域名不会因为
+关一次开关就丢。存根空了会被删掉。存根丢失也能开启，此时缺哪条补哪条，回落到
+`config_gen.sh` 里的内置默认。
+
+一组里少了一条（比如手动删了端口规则）算「已关闭」，开启时只补缺的那条，不会写重复。
+
+实现在 `download_block.sh`。它不自己维护一份默认规则，需要默认值时是现调
+`write_default_route_json` 生成一份再把带标记的规则取出来用。改 JSON 依赖 python3
+（或 python），没有解释器时明确报错而不是拼字符串；`route.json` 缺失或解析失败时
+一个字节都不写。插入位置固定在第一条无匹配条件的兜底规则之前——插在兜底之后的规则
+永远匹配不到。
+
+`tests/download_block_toggle_test.sh` 覆盖分组开关、互不干扰、幂等、部分缺失补齐、
+存根自愈、自定义 route.json 以及菜单接线。
+
+### 老机器升级：自动补标记
+
+`route.json` 已存在时安装脚本一律不覆盖（用户改过的内容要保留），所以 ruleTag 之前
+生成的配置里那几条 BT 规则是没有标记的，分组开关认不出来。升级会自动跑一次迁移把标记
+补上：`install.sh`（`N2X update` 走的也是它）和 `N2X update_shell` 各调一次
+`download_block_migrate`。幂等，跑多少次都一样。
+
+迁移做三件事：
+
+- `protocol: ["bittorrent"]` 的规则就地打上 `download-block-protocol`，不挪位置
+- 端口含 `6881` 的规则就地打上 `download-block-port`
+- 从常规域名黑名单里摘掉认识的下载类正则，另立一条带 `download-block-domain` 的规则，
+  内容用当前默认——**老的宽泛正则 `(^|[^a-zA-Z]|bit|u)torrent` 就是在这一步被换成收窄版
+  `(^|[.])(bittorrent|utorrent)([.]|$)` 的**，升级后 `torrentmac.net` 这类站点不再被误伤
+
+只认得出确定的老默认值，认不出的规则一律不碰；用户已经关掉的分组也不会被塞回来
+（规则不在 `route.json` 里就没得打标）。`route.json` 缺失时静默跳过，解析失败时返回
+非零且一个字节都不写，且不会中断安装。
+
+`tests/download_block_migrate_test.sh` 覆盖迁移、幂等、部分迁移、已关分组不回填、
+无关配置不动、缺失/损坏处理以及升级流程接线。
+
 ## 最小诱饵 Web 服务
 
 N2X 安装和升级会部署一个独立的本地 Web companion。它使用同一份 N2X 二进制，仅监听 loopback，不占用节点公网端口，也不依赖 Caddy 或 Nginx。

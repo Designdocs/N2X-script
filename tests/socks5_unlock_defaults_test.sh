@@ -67,12 +67,39 @@ assert rules[fallback]["network"] == "udp,tcp"
 # 合并后的唯一默认：initconfig.sh 的完整规则集（含 21 条域名黑名单），
 # 并给每条规则补上 xray 唯一认识的 "type": "field"。
 assert all(rule.get("type") == "field" for rule in rules), "每条规则都要带 type=field"
+# 域名黑名单拆成两条：一条常规（不可开关），一条 download-block-domain（可开关）。
+# 两条加起来仍是原来那 21 条正则，一条都不能少。
 blocklist = [
     rule for rule in rules if rule.get("outboundTag") == "block" and rule.get("domain")
 ]
-assert len(blocklist) == 1 and len(blocklist[0]["domain"]) == 21, "域名黑名单不完整"
+assert len(blocklist) == 2, f"域名黑名单应为 2 条，实得 {len(blocklist)}"
+general = [r for r in blocklist if not r.get("ruleTag")]
+download = [r for r in blocklist if r.get("ruleTag") == "download-block-domain"]
+assert len(general) == 1 and len(download) == 1, "常规黑名单与下载黑名单各应有 1 条"
+assert len(general[0]["domain"]) == 18, "常规域名黑名单不完整"
+assert len(download[0]["domain"]) == 3, "下载类域名黑名单不完整"
+assert len(general[0]["domain"]) + len(download[0]["domain"]) == 21, "拆分后正则总数不对"
+assert not any("torrent" in d or "xunlei" in d for d in general[0]["domain"]), (
+    "下载类正则不该留在常规黑名单里，否则关不掉"
+)
+
+# 下载拦截是一组可整体摘挂的规则，download_block.sh 靠 ruleTag 找它们。
+tagged = [r for r in rules if str(r.get("ruleTag", "")).startswith("download-block")]
+assert len(tagged) == 3, f"应有 3 条 download-block 规则，实得 {len(tagged)}"
+assert {r["ruleTag"] for r in tagged} == {
+    "download-block-domain",
+    "download-block-protocol",
+    "download-block-port",
+}
+assert all(r.get("outboundTag") == "block" for r in tagged)
 assert any(
-    rule.get("outboundTag") == "block" and rule.get("protocol") == ["bittorrent"]
+    rule.get("ruleTag") == "download-block-protocol"
+    and rule.get("protocol") == ["bittorrent"]
+    for rule in rules
+)
+assert any(
+    rule.get("ruleTag") == "download-block-port"
+    and rule.get("port") == "6881-6889,6969,2710,51413"
     for rule in rules
 )
 assert any(
@@ -87,7 +114,7 @@ assert any(
 assert generated_json("dns.json")["tag"] == "dns_inbound"
 
 # 调用方不得再长回自己的那份 heredoc。
-for caller in ("initconfig.sh", "N2X.sh", "config_append.sh"):
+for caller in ("initconfig.sh", "N2X.sh", "config_append.sh", "download_block.sh"):
     text = (repo / caller).read_text()
     for path in ("custom_outbound.json", "route.json", "dns.json"):
         assert f"> /etc/N2X/{path}" not in text, f"{caller} still writes {path} inline"
