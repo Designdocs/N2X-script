@@ -185,7 +185,7 @@ N2X download off domain
 
 | 项 | 规则 |
 | --- | --- |
-| 标签 | `[A-Za-z0-9][A-Za-z0-9_.-]*`，不能撞 `IPv4_out`/`IPv6_out`/`block`/`socks5-unlock`，也不能和已有的重名 |
+| 标签 | `[A-Za-z0-9][A-Za-z0-9_.-]*`，不能撞 `IPv4_out`/`IPv6_out`/`block`/`socks5-unlock`，也不能和已有的重名；默认 `sk5-unlock`（被占用就顺次 `sk5-unlock-2`…），直接回车即可 |
 | 协议 | 只收 `http` / `socks`（xray 里 socks5 的协议名就是 `socks`） |
 | 地址 | 域名、IPv4 或 IPv6，不接受带 `://`、端口或空格的写法 |
 | 端口 | 1-65535 的纯数字，写进 JSON 时是数字不是字符串 |
@@ -194,6 +194,26 @@ N2X download off domain
 
 校验不过会当场重问那一项，不会把半截配置写进去。密码里的引号、反斜杠交给 json 库转义，
 不拼字符串。
+
+### 域名条目怎么输
+
+空行结束，中间怎么输都行——一行一条、整段粘贴、空格分隔混着来都认：
+
+```
+# 直接把 route.json 里的一段贴进来，引号、逗号、方括号、缩进都会被剥掉
+                "geosite:anthropic",
+                "geosite:openai",
+                "gemini.google.com"
+
+# 或者一行贴一长串，空格分隔
+geosite:anthropic geosite:openai domain:gemini.google.com domain:withgoogle.com
+
+# 逗号分隔也行
+a.com,b.com,c.com
+```
+
+重复的条目自动去掉，格式不对的当场报错并跳过那一条，不影响同一行里其它条目。
+`regexp:` 条目里的逗号和方括号是正则语法，不会被当成分隔符或包裹符号剥掉。
 
 ### 位置与生效
 

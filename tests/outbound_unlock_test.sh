@@ -19,6 +19,9 @@ for fn in outbound_unlock_validate_tag outbound_unlock_validate_port \
           outbound_unlock_validate_address outbound_unlock_validate_domain_entry \
           outbound_unlock_add outbound_unlock_tags outbound_unlock_clear \
           outbound_unlock_parse_url outbound_unlock_add_raw \
+          outbound_unlock_default_tag outbound_unlock_trim_domain_token \
+          outbound_unlock_expand_domain_tokens outbound_unlock_collect_domains \
+          outbound_unlock_read_domains \
           outbound_unlock_menu outbound_unlock_command; do
     declare -F "$fn" >/dev/null || fail "outbound_unlock.sh 未定义 ${fn}"
 done
@@ -71,6 +74,50 @@ done
 for bad in "" "has space" "geosite:" "domain:" "有中文.com"; do
     outbound_unlock_validate_domain_entry "$bad" 2>/dev/null && fail "域名条目 [${bad}] 应被拒绝"
 done
+
+# --- 1b. 批量域名录入 -------------------------------------------------------
+reset_files
+
+OUTBOUND_UNLOCK_DOMAINS=()
+# JSON 数组片段：带引号、逗号、方括号、缩进，还有一行只有 "domain": [
+outbound_unlock_collect_domains '                "geosite:anthropic",' >/dev/null 2>&1
+outbound_unlock_collect_domains '"domain": [' >/dev/null 2>&1
+outbound_unlock_collect_domains '                "gemini.google.com",' >/dev/null 2>&1
+outbound_unlock_collect_domains ']' >/dev/null 2>&1
+# 空格分隔的一长串
+outbound_unlock_collect_domains 'geosite:openai domain:deepmind.com full:ai.google.dev' >/dev/null 2>&1
+# 逗号分隔（非 regexp 条目才按逗号拆）
+outbound_unlock_collect_domains 'a.com,b.com , c.com' >/dev/null 2>&1
+# regexp 里的逗号和方括号必须原样保留
+outbound_unlock_collect_domains '"regexp:^x[0-9]{1,3}\.com$",' >/dev/null 2>&1
+# 重复的自动去掉，非法的跳过且不中断整行
+outbound_unlock_collect_domains 'geosite:openai bad entry!! withgoogle.com' >/dev/null 2>&1
+
+expected=(geosite:anthropic gemini.google.com geosite:openai domain:deepmind.com
+          full:ai.google.dev a.com b.com c.com 'regexp:^x[0-9]{1,3}\.com$' withgoogle.com)
+[[ ${#OUTBOUND_UNLOCK_DOMAINS[@]} -eq ${#expected[@]} ]] \
+    || fail "批量录入条数不对：${OUTBOUND_UNLOCK_DOMAINS[*]}"
+for i in "${!expected[@]}"; do
+    [[ "${OUTBOUND_UNLOCK_DOMAINS[$i]}" == "${expected[$i]}" ]] \
+        || fail "第 $i 条应为 ${expected[$i]}，实得 ${OUTBOUND_UNLOCK_DOMAINS[$i]}"
+done
+
+# read_domains：整段粘贴（多行）+ 空行结束
+OUTBOUND_UNLOCK_DOMAINS=()
+printf '%s\n' '                "geosite:anthropic",' '                "withgoogle.com"' '' \
+    | { outbound_unlock_read_domains >/dev/null 2>&1
+        [[ "${OUTBOUND_UNLOCK_DOMAINS[*]}" == "geosite:anthropic withgoogle.com" ]] \
+            || fail "read_domains 批量粘贴结果不对：${OUTBOUND_UNLOCK_DOMAINS[*]}"; } \
+    || exit 1
+
+# --- 1c. 默认出站标签 -------------------------------------------------------
+reset_files
+[[ "$(outbound_unlock_default_tag)" == "sk5-unlock" ]] \
+    || fail "默认标签应为 sk5-unlock，实得 $(outbound_unlock_default_tag)"
+outbound_unlock_add "sk5-unlock" socks 1.2.3.4 1080 "" "" 0 "" 0 geosite:openai \
+    >/dev/null || fail "占用 sk5-unlock 失败"
+[[ "$(outbound_unlock_default_tag)" == "sk5-unlock-2" ]] \
+    || fail "sk5-unlock 被占用后默认应为 sk5-unlock-2，实得 $(outbound_unlock_default_tag)"
 
 # --- 2. 添加一条带 TLS 与账号密码的 http 解锁 -------------------------------
 reset_files

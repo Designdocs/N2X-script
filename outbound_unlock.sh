@@ -478,6 +478,20 @@ outbound_unlock_tags() {
     return 0
 }
 
+# 出站标签的默认值。多数人只加一条 socks5 解锁，默认给个能直接回车用的名字；
+# sk5-unlock 被占了就顺次 sk5-unlock-2、sk5-unlock-3……，免得默认值一进来就撞名。
+outbound_unlock_default_tag() {
+    local base="${OUTBOUND_UNLOCK_DEFAULT_TAG_BASE:-sk5-unlock}" candidate used n=2
+    used=" ${OUTBOUND_UNLOCK_RESERVED_TAGS} $(outbound_unlock_tags 2>/dev/null) "
+    candidate="$base"
+    while [[ "$used" == *" ${candidate} "* ]]; do
+        candidate="${base}-${n}"
+        n=$(( n + 1 ))
+        (( n > 99 )) && break
+    done
+    printf '%s\n' "$candidate"
+}
+
 outbound_unlock_list() {
     local ob rt
     ob="$(outbound_unlock_outbound_path)"
@@ -687,19 +701,97 @@ outbound_unlock_prompt() {
     done
 }
 
-# 逐条读域名条目，空行结束。校验不过的当场提示并重来，不计入。
+# 把粘进来的一行拆成若干条目。三种写法混着来都认：
+#   一行一条          geosite:openai
+#   空格分隔          geosite:openai domain:openai.com
+#   JSON 数组片段     "geosite:openai",   /  [  /  "domain": [
+# regexp: 里合法地会出现逗号和方括号，所以这类条目只脱两端的包裹符号，不再按逗号拆。
+outbound_unlock_trim_domain_token() {
+    local token="$1" mode="${2:-full}" prev=""
+    while [[ "$token" != "$prev" ]]; do
+        prev="$token"
+        token="${token#'"'}"
+        token="${token#"'"}"
+        token="${token#","}"
+        token="${token%'"'}"
+        token="${token%"'"}"
+        token="${token%","}"
+        if [[ "$mode" == full ]]; then
+            token="${token#"["}"
+            token="${token%"]"}"
+        fi
+    done
+    printf '%s' "$token"
+}
+
+# 一行输入 -> 每行一条规范化后的条目（未校验）。
+outbound_unlock_expand_domain_tokens() {
+    local raw="$1" token clean piece glob_off=0
+    # regexp: 条目里的 * ? 不关通配符会被当文件名展开，这里临时关掉
+    case "$-" in
+        *f*) ;;
+        *) glob_off=1; set -f ;;
+    esac
+    for token in $raw; do
+        # JSON 的键名部分（"domain": / "domains":）不是条目，直接丢掉
+        case "$token" in
+            '"domain":'|'"domains":'|'"domain"'|'"domains"'|'"domain":['|'"domains":[') continue ;;
+        esac
+        clean="$(outbound_unlock_trim_domain_token "$token")"
+        [[ -z "$clean" ]] && continue
+        if [[ "$clean" == regexp:* ]]; then
+            # 正则里的 [ ] 是自己的语法，不能当包裹符号脱掉
+            printf '%s\n' "$(outbound_unlock_trim_domain_token "$token" soft)"
+            continue
+        fi
+        while IFS= read -r piece; do
+            piece="$(outbound_unlock_trim_domain_token "$piece")"
+            [[ -n "$piece" ]] && printf '%s\n' "$piece"
+        done <<< "${clean//,/$'\n'}"
+    done
+    (( glob_off )) && set +f
+    return 0
+}
+
+# 收下一行输入里的所有条目：逐条校验、去重，结果追加进 OUTBOUND_UNLOCK_DOMAINS。
+outbound_unlock_collect_domains() {
+    local raw="$1" entry existing dup added=0
+    while IFS= read -r entry; do
+        [[ -z "$entry" ]] && continue
+        outbound_unlock_validate_domain_entry "$entry" || continue
+        dup=0
+        for existing in ${OUTBOUND_UNLOCK_DOMAINS[@]+"${OUTBOUND_UNLOCK_DOMAINS[@]}"}; do
+            if [[ "$existing" == "$entry" ]]; then
+                dup=1
+                break
+            fi
+        done
+        if [[ "$dup" == 1 ]]; then
+            echo -e "${yellow}已有相同条目，跳过：${entry}${plain}" >&2
+            continue
+        fi
+        OUTBOUND_UNLOCK_DOMAINS+=("$entry")
+        added=$(( added + 1 ))
+    done < <(outbound_unlock_expand_domain_tokens "$raw")
+    if (( added > 1 )); then
+        echo -e "${green}本次收下 ${added} 条，当前共 ${#OUTBOUND_UNLOCK_DOMAINS[@]} 条。${plain}"
+    fi
+    return 0
+}
+
+# 读域名条目，空行结束。一行一条或整段粘贴都行，校验不过的当场提示并跳过，不计入。
 # 结果放进调用方声明的数组 OUTBOUND_UNLOCK_DOMAINS。
 outbound_unlock_read_domains() {
-    local entry
+    local line
     OUTBOUND_UNLOCK_DOMAINS=()
-    echo -e "\n${yellow}逐条输入要走这个出站的域名，每输入一条回车，空行结束。${plain}"
+    echo -e "\n${yellow}输入要走这个出站的域名，空行结束。${plain}"
+    echo -e "${yellow}可以一行一条，也可以整段粘贴——JSON 数组片段（带引号逗号方括号）、${plain}"
+    echo -e "${yellow}空格分隔的一长串都认，重复的会自动去掉。${plain}"
     echo -e "${yellow}写法：geosite:openai、domain:openai.com、full:chat.openai.com、regexp:.*openai.*，或直接 openai.com${plain}"
     while true; do
-        read -rp "  域名条目 #$(( ${#OUTBOUND_UNLOCK_DOMAINS[@]} + 1 ))（空行结束）: " entry
-        [[ -z "$entry" ]] && break
-        if outbound_unlock_validate_domain_entry "$entry"; then
-            OUTBOUND_UNLOCK_DOMAINS+=("$entry")
-        fi
+        read -rp "  域名条目 #$(( ${#OUTBOUND_UNLOCK_DOMAINS[@]} + 1 ))（空行结束，可整段粘贴）: " line
+        [[ -z "${line//[[:space:]]/}" ]] && break
+        outbound_unlock_collect_domains "$line"
     done
 }
 
@@ -737,7 +829,8 @@ outbound_unlock_add_from_url() {
         echo "  账号    （无）"
     fi
 
-    outbound_unlock_prompt tag "出站标签（英文）" "" outbound_unlock_validate_tag || return 1
+    outbound_unlock_prompt tag "出站标签（英文）" "$(outbound_unlock_default_tag)" \
+        outbound_unlock_validate_tag || return 1
 
     outbound_unlock_read_domains
     if [[ ${#OUTBOUND_UNLOCK_DOMAINS[@]} -eq 0 ]]; then
@@ -770,8 +863,8 @@ outbound_unlock_add_from_json() {
         return 1
     fi
 
-    outbound_unlock_prompt tag "出站标签（英文；JSON 里已有 tag 就填相同的）" "" \
-        outbound_unlock_validate_tag || return 1
+    outbound_unlock_prompt tag "出站标签（英文；JSON 里已有 tag 就填相同的）" \
+        "$(outbound_unlock_default_tag)" outbound_unlock_validate_tag || return 1
 
     outbound_unlock_read_domains
     if [[ ${#OUTBOUND_UNLOCK_DOMAINS[@]} -eq 0 ]]; then
@@ -798,7 +891,7 @@ outbound_unlock_add_by_fields() {
     local tag protocol address port user password use_tls server_name allow_insecure
     local answer
 
-    outbound_unlock_prompt tag "出站标签（英文，如 http-unlock）" "" \
+    outbound_unlock_prompt tag "出站标签（英文）" "$(outbound_unlock_default_tag)" \
         outbound_unlock_validate_tag || return 1
     outbound_unlock_prompt protocol "协议（http / socks）" "http" \
         outbound_unlock_validate_protocol || return 1
