@@ -33,6 +33,7 @@ for protocol in hysteria tuic shadowtls naive; do
 done
 grep -Fq 'ShadowTLSOptions' "$config_path"
 grep -Fq 'NaiveOptions' "$config_path"
+grep -Fq 'ArtXOptions' "$config_path"
 
 for caller in initconfig.sh N2X.sh; do
     caller_path="${repo_dir}/${caller}"

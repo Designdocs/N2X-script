@@ -116,6 +116,16 @@ select_cert_mode() {
 # 协议专属选项块。输出带 12 空格缩进、以逗号结尾的 JSON 片段，无内容时输出空。
 node_protocol_options() {
     case "$NodeType" in
+        artx )
+            # 两项都是主机内存占比，内核自己的默认值就是这两个数字，写出来是为了
+            # 让装完机的人知道有这两个旋钮可调，而不是必须改才能跑。
+            cat <<EOF
+            "ArtXOptions": {
+                "WindowBudgetSharePercent": 25,
+                "WindowBudgetReservePercent": 20
+            },
+EOF
+            ;;
         shadowtls )
             local handshake="" handshake_port=""
             read -rp "请输入 ShadowTLS 握手目标域名（回车则使用面板下发的值）：" handshake
@@ -320,6 +330,7 @@ config_help_block() {
         "Nodes.Network": "ListenIP/SendIP 可填 0.0.0.0、:: 或指定地址；EnableProxyProtocol 仅在受信任的前置代理发送 PROXY protocol 时开启；EnableUot/EnableTFO 填 true 或 false。",
         "Nodes.Sing": "sing 节点用 EnableSniff 控制流量嗅探，DomainStrategy 可填 AsIs/PreferIPv4/PreferIPv6/IPv4Only/IPv6Only。",
         "Nodes.ShadowTLSOptions": "均为面板值的本地覆盖，留空或填 0 表示沿用面板下发：Version 可填 1/2/3；HandshakeServer 与 HandshakeServerPort 指定伪装握手的目标站点；StrictMode 建议仅在握手目标可控时开启；WildcardSNI 可填 off/authed/all。",
+        "Nodes.ArtXOptions": "仅 artx 节点使用，两项都是主机总内存的百分比，填 0 表示沿用内核默认值：WindowBudgetSharePercent 是 ArtX 可用于接收窗口的内存占比（1..100，默认 25），该预算在连接被接受时按当时在线的连接数均分，决定还有多少并发用户能拿到最宽的窗口；WindowBudgetReservePercent 是必须留给系统上其他程序的内存占比（1..99，默认 20），窗口预算会被压低到不会把可用内存吃到这条线以下。",
         "Nodes.NaiveOptions": "Network 可填 tcp（HTTP/2）或 udp（HTTP/3），留空表示两者都监听。注意 naive 增删用户会重建监听器并断开在途连接。",
         "Nodes.CertConfig": "CertMode 可填 none/file/http/dns/self：file 使用现有证书，http/dns 自动申请，self 生成自签证书；RejectUnknownSni=true 时拒绝未知 SNI。hysteria2/tuic/naive/anytls 必须有可用证书，shadowtls 固定填 none。",
         "Nodes.CertPaths": "http/dns/self 模式的 CertFile 和 KeyFile 支持 {domain}；file 模式请填写现有证书的实际绝对路径。",

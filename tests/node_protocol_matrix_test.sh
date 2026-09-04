@@ -138,11 +138,21 @@ n = json.load(sys.stdin)
 assert "NaiveOptions" in n, "naive node is missing NaiveOptions"
 ' || { echo "FAIL choice ${choice}: missing NaiveOptions" >&2; failures=$((failures + 1)); }
             ;;
+        artx )
+            printf '%s' "$node_json" | python3 -c '
+import json, sys
+n = json.load(sys.stdin)
+o = n.get("ArtXOptions")
+assert o is not None, "artx node is missing ArtXOptions"
+assert o["WindowBudgetSharePercent"] == 25, o
+assert o["WindowBudgetReservePercent"] == 20, o
+' || { echo "FAIL choice ${choice}: bad ArtXOptions" >&2; failures=$((failures + 1)); }
+            ;;
         * )
             printf '%s' "$node_json" | python3 -c '
 import json, sys
 n = json.load(sys.stdin)
-for key in ("ShadowTLSOptions", "NaiveOptions"):
+for key in ("ShadowTLSOptions", "NaiveOptions", "ArtXOptions"):
     assert key not in n, key + " leaked into an unrelated protocol"
 ' || { echo "FAIL choice ${choice}: protocol option leaked" >&2; failures=$((failures + 1)); }
             ;;
