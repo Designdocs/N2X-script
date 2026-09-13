@@ -1490,6 +1490,7 @@ EOF
     echo "N2X x25519       - 生成 x25519 密钥"
     echo "N2X generate     - 生成 N2X 配置文件（重建，会覆盖已有节点）"
     echo "N2X addnode      - 在已有配置上增加协议配置"
+    echo "N2X check        - 检查 N2X 配置文件（不启动服务）"
     echo "N2X update       - 更新 N2X"
     echo "N2X update x.x.x - 更新 N2X 指定版本"
     echo "N2X install      - 安装 N2X"

@@ -29,6 +29,13 @@ xray 配套文件 `dns.json` / `custom_outbound.json` / `route.json` 的默认�
 明确报错——这三个文件是 `Cores.Paths` 指向的路径，xray 读不到会直接 panic。已存在的文件
 一律不覆盖。`tests/install_side_files_test.sh` 覆盖这段逻辑。
 
+## 检查配置文件
+
+菜单 `22. 检查配置文件` 或命令 `N2X check` 会校验整份 `/etc/N2X/config.json`，但不启动服务，也不申请证书。
+校验内容和 N2X 启动前的检查一致：JSON 格式、重复键和未知键、环境变量、取值范围、引用的文件，以及证书配置。
+配置有错时逐条列出位置（数组下标从 0 开始），退出码非 0；`DnsConfigPath` 的问题只算警告，不会导致检查失败。
+这个功能需要 N2X 本身也是支持 `check` 子命令的新版，旧版会提示先执行 `N2X update`。
+
 ## 新增协议：追加还是重建
 
 菜单里是两件不同的事，别用错：

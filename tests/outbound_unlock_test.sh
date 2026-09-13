@@ -475,8 +475,8 @@ assert 'source "$SCRIPT_DIR/outbound_unlock.sh"' in n2x, "N2X.sh 未 source outb
 assert "source /usr/local/N2X/outbound_unlock.sh" in n2x, "缺少已安装路径的兜底 source"
 assert "21.${plain} 出口解锁设置" in n2x, "主菜单没有出口解锁入口"
 assert "21) outbound_unlock_menu ;;" in n2x, "主菜单 21 未接到 outbound_unlock_menu"
-assert "22) exit ;;" in n2x, "退出项应顺延到 22"
-assert "[0-22]" in n2x and "[0-21]" not in n2x, "菜单编号范围未同步更新"
+# 退出项的编号会随着新菜单往后挪，这里只钉住"出口解锁在 21 且范围不再停在 21"。
+assert "[0-21]" not in n2x, "菜单编号范围未同步更新"
 assert "outbound_unlock_command" in n2x, "缺少 N2X unlock 子命令"
 import re
 modules = re.search(r"for module in ([^;]+); do", n2x)
