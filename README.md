@@ -53,8 +53,9 @@ xray 配套文件 `dns.json` / `custom_outbound.json` / `route.json` 的默认�
   配不同协议是允许的。
 - ApiHost/ApiKey 默认沿用现有节点。现有值是 `${N2X_API_HOST}` 这类占位符时直接照抄，
   不会把 `.env` 里的明文写进配置。
-- 新节点的证书信息（`CertDomain`/`Email`/`Provider`/`DNSEnv`）在仍是占位值时，
-  从现有节点继承，并在合并时打印继承了哪些字段。
+- 证书域名提示回车时默认沿用现有节点的 `CertDomain`（现有节点都没有证书时默认
+  `all.nom-loc.com`）。新节点的其余证书信息（`Email`/`Provider`/`DNSEnv`，域名相同时还有
+  `CertFile`/`KeyFile`）在仍是占位值时从现有节点继承，并在合并时打印继承了哪些字段。
 - 新增 xray 核心时补齐 `dns.json`、`custom_outbound.json`、`route.json`——xray 读不到
   `RouteConfigPath`/`OutboundConfigPath` 指向的文件会直接 panic。已存在的文件一律不覆盖。
 - 合并前会把原文件备份到 `config.json.bak`；解析失败时不做任何改动。合并依赖 python3

@@ -163,8 +163,9 @@ assert_config() {
 
 # --- 1. xray 配置上追加一个 sing 协议 --------------------------------------
 new_case "$xray_config"
-# 沿用 ApiHost/ApiKey；NodeID 4242；协议 8=hysteria；证书 1=http；不再继续添加
-if ! run_append ";4242;8;1;n"; then
+# 沿用 ApiHost/ApiKey；NodeID 4242；协议 8=hysteria；域名回车（默认沿用现有节点的）；
+# 证书 1=http；回车不再继续添加
+if ! run_append ";4242;8;;1;"; then
     fail "在 xray 配置上追加 sing 节点失败"
 fi
 
@@ -190,6 +191,7 @@ assert new["EnableSniff"] is True and "DNSType" not in new
 cert = new["CertConfig"]
 assert cert["CertMode"] == "http"
 assert cert["CertDomain"] == "n1.example.com", "证书域名没有从现有节点继承：%r" % cert
+assert cert["CertFile"] == old["CertConfig"]["CertFile"], "域名相同却没继承证书路径：%r" % cert
 assert cert["Email"] == "ops@example.com", cert
 assert cert["Provider"] == "alidns", cert
 assert cert["DNSEnv"] == {"ALICLOUD_ACCESS_KEY": "real-key"}, cert
@@ -203,7 +205,7 @@ fi
 
 # --- 2. 重复节点不写入 ------------------------------------------------------
 before="$(cat "${N2X_CONFIG_DIR}/config.json")"
-if run_append ";4242;8;1;n"; then
+if run_append ";4242;8;;1;"; then
     fail "重复节点应当被拒绝并返回非 0"
 fi
 if [[ "$before" != "$(cat "${N2X_CONFIG_DIR}/config.json")" ]]; then
@@ -211,7 +213,7 @@ if [[ "$before" != "$(cat "${N2X_CONFIG_DIR}/config.json")" ]]; then
 fi
 
 # 同 NodeID 但换个协议是合法的（面板里 ID 按协议各排各的）
-if ! run_append ";4242;9;1;n"; then
+if ! run_append ";4242;9;;1;"; then
     fail "同 NodeID 不同协议应当允许追加"
 fi
 assert_config "同 NodeID 不同协议追加后不符合预期" '
@@ -225,8 +227,8 @@ assert [c["Type"] for c in d["Cores"]] == ["xray", "sing"], "核心不该重复�
 # --- 3. sing 配置上追加 xray 协议，并补齐配套文件 ---------------------------
 new_case "$sing_config"
 # 现有节点用的是 ${N2X_API_HOST} 占位符，不会问是否沿用；先问自定义 DNS(y)，
-# 再 NodeID 7；协议 2=vless；不是 reality(n)；不配 TLS(n)；不再继续(n)
-if ! run_append "y;7;2;n;n;n"; then
+# 再 NodeID 7；协议 2=vless；不是 reality(n)；不配 TLS(n)；回车不再继续
+if ! run_append "y;7;2;n;n;"; then
     fail "在 sing 配置上追加 xray 节点失败"
 fi
 
@@ -284,8 +286,8 @@ if [[ "$before" != "$(cat "${N2X_CONFIG_DIR}/config.json")" ]]; then
 fi
 
 # 同意之后正常合并：y=确认丢注释；回车沿用 API；n=不开自定义 DNS；
-# NodeID 9；协议 9=tuic；证书 1=http；n=结束
-if ! run_append "y;;n;9;9;1;n"; then
+# NodeID 9；协议 9=tuic；域名回车（现有节点没有证书，取默认值）；证书 1=http；n=结束
+if ! run_append "y;;n;9;9;;1;n"; then
     fail "带注释的配置应当在确认后可以追加"
 fi
 assert_config "带注释的配置合并后不符合预期" '
@@ -297,6 +299,7 @@ old, new = d["Nodes"]
 assert old["ApiHost"] == "https://p.example.com/api//x", "字符串里的 // 被当成注释删了：%r" % old
 assert old["ApiKey"] == "a,b//c", old
 assert new["ApiHost"] == old["ApiHost"] and new["ApiKey"] == old["ApiKey"], new
+assert new["CertConfig"]["CertDomain"] == "all.nom-loc.com", new["CertConfig"]
 '
 
 # --- 5. 缺少配置文件时明确失败 ---------------------------------------------

@@ -69,8 +69,8 @@ generate_config_file() {
             first_node=false
             add_node_config
         else
-            read -rp "是否继续添加节点配置？(回车继续，输入n或no退出)" continue_adding_node
-            if [[ "$continue_adding_node" =~ ^[Nn][Oo]? ]]; then
+            read -rp "是否继续添加节点配置？(y继续，回车或n退出)" continue_adding_node
+            if [[ ! "$continue_adding_node" =~ ^[Yy]([Ee][Ss])?$ ]]; then
                 break
             fi
             add_node_config

@@ -81,10 +81,22 @@ select_node_protocol() {
     fi
 }
 
-# 证书模式选择。设置：certmode
+# 证书域名回车时的默认值。追加协议时由 config_append.sh 换成现有节点的域名。
+DEFAULT_CERT_DOMAIN="all.nom-loc.com"
+
+# 证书域名输入。设置：certdomain
+read_cert_domain() {
+    local default_domain="${cert_domain_default:-$DEFAULT_CERT_DOMAIN}"
+    read -rp "请输入证书域名（回车默认 ${default_domain}）：" certdomain
+    certdomain="${certdomain//[[:space:]]/}"
+    certdomain="${certdomain:-$default_domain}"
+}
+
+# 证书模式选择。设置：certmode / certdomain
 select_cert_mode() {
     certmode="none"
-    certdomain="example.com"
+    # 不需要证书的节点保持占位值，追加协议时 config_append.sh 靠它判断能否继承。
+    certdomain="all.example.com"
 
     if [ "$nocert" == "y" ]; then
         # ShadowTLS 直接借用握手目标站点的证书，自己不需要证书。
@@ -97,6 +109,7 @@ select_cert_mode() {
     fi
 
     if [[ "$isreality" != "y" && "$isreality" != "Y" && ( "$istls" == "y" || "$istls" == "Y" ) ]]; then
+        read_cert_domain
         echo -e "${yellow}请选择证书申请模式：${plain}"
         echo -e "${green}1. http模式自动申请，节点域名已正确解析${plain}"
         echo -e "${green}2. dns模式自动申请，需填入正确域名服务商API参数${plain}"
@@ -243,7 +256,7 @@ $(node_extra_options)
             "CertConfig": {
                 "CertMode": "$certmode",
                 "RejectUnknownSni": false,
-                "CertDomain": "all.example.com",
+                "CertDomain": "$certdomain",
                 "CertFile": "/etc/N2X/fullchain-{domain}.cer",
                 "KeyFile": "/etc/N2X/cert-{domain}.key",
                 "Email": "example@gmail.com",

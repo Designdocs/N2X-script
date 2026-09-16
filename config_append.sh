@@ -30,9 +30,9 @@ n2x_python_bin() {
 # 唯一的 python 入口，两种模式：
 #
 #   facts <config.json>
-#       固定输出 7 行（是否需要清理注释 / 是否已有 xray / 是否已有 sing /
-#       xray 是否配了 DnsConfigPath / 节点数 / ApiHost / ApiKey），其后是给人看
-#       的节点清单。
+#       固定输出 8 行（是否需要清理注释 / 是否已有 xray / 是否已有 sing /
+#       xray 是否配了 DnsConfigPath / 节点数 / ApiHost / ApiKey / 可继承的证书
+#       域名，没有则为空），其后是给人看的节点清单。
 #
 #   merge <config.json> <nodes.json> <cores.json> <out.json>
 #       把 nodes.json 追加进 Nodes、把 cores.json 里缺失的核心追加进 Cores，
@@ -176,8 +176,9 @@ def inherit_cert(new_node, donor):
 
     inherited = []
     for field, placeholders in CERT_PLACEHOLDERS.items():
-        if field in ('CertFile', 'KeyFile') and 'CertDomain' not in inherited:
-            # 证书路径通常带着域名，域名没继承就别继承路径，否则指到别的域名上。
+        if field in ('CertFile', 'KeyFile') and 'CertDomain' not in inherited \
+                and cert.get('CertDomain') != donor.get('CertDomain'):
+            # 证书路径通常带着域名，域名和现有节点不同就别继承路径，否则指到别的域名上。
             continue
         donor_value = donor.get(field)
         if not isinstance(donor_value, str) or not donor_value.strip():
@@ -222,6 +223,11 @@ def do_facts(path):
         if host or key:
             break
 
+    donor = cert_donor(nodes)
+    donor_domain = one_line(donor.get('CertDomain')).strip() if donor else ''
+    if donor_domain in CERT_PLACEHOLDERS['CertDomain']:
+        donor_domain = ''
+
     out = [
         'true' if trimmed else 'false',
         'true' if 'xray' in types else 'false',
@@ -230,6 +236,7 @@ def do_facts(path):
         str(len(nodes)),
         host,
         key,
+        donor_domain,
     ]
     for node in nodes:
         cert = node.get('CertConfig')
@@ -418,7 +425,7 @@ select_append_api_info() {
 # 服务），无改动或失败返回非 0。
 append_node_configs() {
     local cfg_dir cfg facts trimmed has_xray has_sing existing_dns node_count
-    local existing_host existing_key node_table answer tmp_dir nodes_str core_list
+    local existing_host existing_key existing_domain node_table answer tmp_dir nodes_str core_list
     local add_xray=false add_sing=false saved_xray saved_sing new_cores merge_status
 
     cfg_dir="$(n2x_config_dir)"
@@ -450,6 +457,7 @@ append_node_configs() {
         IFS= read -r node_count
         IFS= read -r existing_host
         IFS= read -r existing_key
+        IFS= read -r existing_domain
         node_table="$(cat)"
     } <<EOF
 $facts
@@ -504,13 +512,16 @@ EOF
         fi
     fi
 
+    # 证书域名回车默认沿用现有节点的，没有才用 config_gen.sh 的默认值。
+    local cert_domain_default="$existing_domain"
+
     nodes_config=()
     core_xray=false
     core_sing=false
     while true; do
         add_node_config
-        read -rp "是否继续添加节点配置？(回车继续，输入n或no退出)" answer
-        if [[ "$answer" =~ ^[Nn][Oo]? ]]; then
+        read -rp "是否继续添加节点配置？(y继续，回车或n退出)" answer
+        if [[ ! "$answer" =~ ^[Yy]([Ee][Ss])?$ ]]; then
             break
         fi
     done

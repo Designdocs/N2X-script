@@ -32,20 +32,21 @@ custom_dns_enabled=false
 #
 # The wizard input is the dialogue after the node id, one answer per ';'.
 # Protocols that force TLS skip the "是否进行TLS配置" question and go straight
-# to the cert-mode menu (1 = http); vless asks about reality first; shadowtls
-# needs no certificate and asks for its handshake target instead.
+# to the domain prompt (empty = default) and the cert-mode menu (1 = http);
+# vless asks about reality first; shadowtls needs no certificate and asks for
+# its handshake target instead.
 matrix=(
-    "1|shadowsocks|xray|http|1;y;1"
+    "1|shadowsocks|xray|http|1;y;n1.test.com;1"
     "2|vless|xray|none|2;n;n"
-    "3|vmess|xray|http|3;y;1"
-    "4|trojan|xray|http|4;y;1"
-    "5|anytls|xray|http|5;1"
-    "6|artx|xray|http|6;1"
-    "7|anytls|sing|http|7;1"
-    "8|hysteria|sing|http|8;1"
-    "9|tuic|sing|http|9;1"
+    "3|vmess|xray|http|3;y;;1"
+    "4|trojan|xray|http|4;y;;1"
+    "5|anytls|xray|http|5;;1"
+    "6|artx|xray|http|6;;1"
+    "7|anytls|sing|http|7;;1"
+    "8|hysteria|sing|http|8;;1"
+    "9|tuic|sing|http|9;;1"
     "10|shadowtls|sing|none|10;"
-    "11|naive|sing|http|11;1"
+    "11|naive|sing|http|11;;1"
 )
 
 # Feeds a ';'-separated dialogue to add_node_config.
@@ -94,7 +95,7 @@ for row in "${matrix[@]}"; do
     if ! result=$(printf '%s' "$node_json" | python3 -c '
 import json, sys
 n = json.load(sys.stdin)
-print(n["NodeType"], n["Core"], n["CertConfig"]["CertMode"], n["NodeID"])
+print(n["NodeType"], n["Core"], n["CertConfig"]["CertMode"], n["NodeID"], n["CertConfig"]["CertDomain"])
 ' 2>&1); then
         echo "FAIL choice ${choice} (${want_type}): invalid JSON" >&2
         echo "$result" >&2
@@ -103,7 +104,19 @@ print(n["NodeType"], n["Core"], n["CertConfig"]["CertMode"], n["NodeID"])
         continue
     fi
 
-    read -r got_type got_core got_cert got_id <<<"$result"
+    read -r got_type got_core got_cert got_id got_domain <<<"$result"
+
+    # Enter at the domain prompt takes the default; a typed domain is kept;
+    # nodes without a certificate keep the placeholder.
+    case "$choice:$want_cert" in
+        1:* ) want_domain="n1.test.com" ;;
+        *:none ) want_domain="all.example.com" ;;
+        * ) want_domain="all.nom-loc.com" ;;
+    esac
+    if [[ "$got_domain" != "$want_domain" ]]; then
+        echo "FAIL choice ${choice}: CertDomain ${got_domain}, want ${want_domain}" >&2
+        failures=$((failures + 1))
+    fi
 
     if [[ "$got_type" != "$want_type" || "$got_core" != "$want_core" || "$got_cert" != "$want_cert" || "$got_id" != "4242" ]]; then
         echo "FAIL choice ${choice}: got ${got_type}/${got_core}/${got_cert}/id=${got_id}, want ${want_type}/${want_core}/${want_cert}/id=4242" >&2
@@ -196,7 +209,7 @@ check_cores true true "xray,sing"
 core_xray=true
 core_sing=true
 nodes_config=()
-run_wizard 4242 "8;1"
+run_wizard 4242 "8;;1"
 run_wizard 4243 "10;"
 nodes_str="${nodes_config[*]}"
 full_config=$(cat <<EOF

@@ -1373,8 +1373,8 @@ generate_config_file() {
             api_key_val="$ApiKey"
             add_node_config
         else
-            read -rp "是否继续添加节点配置？(回车继续，输入n或no退出)" continue_adding_node
-            if [[ "$continue_adding_node" =~ ^[Nn][Oo]? ]]; then
+            read -rp "是否继续添加节点配置？(y继续，回车或n退出)" continue_adding_node
+            if [[ ! "$continue_adding_node" =~ ^[Yy]([Ee][Ss])?$ ]]; then
                 break
             elif [ "$fixed_api_info" = false ]; then
                 read -rp "请输入机场网址：" ApiHost
