@@ -29,6 +29,38 @@ xray 配套文件 `dns.json` / `custom_outbound.json` / `route.json` 的默认�
 明确报错——这三个文件是 `Cores.Paths` 指向的路径，xray 读不到会直接 panic。已存在的文件
 一律不覆盖。`tests/install_side_files_test.sh` 覆盖这段逻辑。
 
+## Cloudflare DNS 证书
+
+Cloudflare 的 DNS 证书配置使用 `DNSEnv.CF_DNS_API_TOKEN`。生成的 `ExampleTOKEN` 需要替换为实际 API Token，权限仅授予所需域名的 `Zone / DNS / Edit` 和 `Zone / Zone / Read`，区域资源选择 `Include / Specific zone`。可参考 [Cloudflare 创建说明](https://developers.cloudflare.com/fundamentals/api/get-started/create-token/)和 [lego 配置说明](https://go-acme.github.io/lego/dns/cloudflare/)。指定 Zone 的权限覆盖其中所有 DNS 记录。
+
+如需通过 `/etc/N2X/.env` 管理 Token，加入 `CF_DNS_API_TOKEN=你的Token`，并将节点的 `DNSEnv` 写为 `{"CF_DNS_API_TOKEN": "${CF_DNS_API_TOKEN}"}`。`Email` 仍是证书账户邮箱，Token 不需要 Cloudflare 邮箱。迁移时应替换旧的 `DNSEnv`，并清理 `.env`、systemd 或容器环境中的旧 `CF_API_KEY`、`CLOUDFLARE_API_KEY`、`CF_API_EMAIL`、`CLOUDFLARE_EMAIL`；脚本保留旧配置渲染兼容性，但不再引导填写全局 Key。
+
+## DDNS 自动更新
+
+DDNS 默认关闭。安装、生成配置和追加节点共用同一套引导：先完成证书配置，再询问是否开启 DDNS，回车保持关闭；未配置证书（包括 REALITY、ShadowTLS 跳过证书的情况）不显示这个选项。开启后可选择 Cloudflare 或阿里云国际平台。配置及凭据需要支持 DDNS 的新版 N2X 二进制。
+
+节点里的 `DDNSConfig` 与 `CertConfig` 同级，例如 Cloudflare：
+
+```json
+"DDNSConfig": {
+  "Enabled": true,
+  "Provider": "cloudflare",
+  "Domain": "node.example.com",
+  "ZoneName": "example.com",
+  "RecordType": "A",
+  "Interval": 300,
+  "TTL": 600,
+  "IPURL": "",
+  "DNSEnv": {"CF_DNS_API_TOKEN": "${CF_DNS_API_TOKEN}"}
+}
+```
+
+阿里云国际平台使用 `Provider: "alidns"`，`DNSEnv` 改为 `{"ALICLOUD_ACCESS_KEY":"${ALICLOUD_ACCESS_KEY}","ALICLOUD_SECRET_KEY":"${ALICLOUD_SECRET_KEY}"}`，在 `.env` 填写国际账号的 RAM AccessKey，按需添加 `ALICLOUD_SECURITY_TOKEN`。调用的是国际账号共用的 HTTPS AliDNS 公共 API `alidns.aliyuncs.com`，RAM 权限只需目标域名的 `DescribeDomainRecords`、`AddDomainRecord`、`UpdateDomainRecord`，不需要删除记录权限。
+
+`Domain` 留空沿用本地 `CertConfig.CertDomain`，泛域名证书必须另填具体主机名。`Provider` 留空沿用证书服务商，`DNSEnv` 留空复用同一服务商的证书凭据；HTTP/self/file 证书模式也可单独配置 DDNS 凭据。`ZoneName` 留空根据公共后缀推断注册域名；若实际托管的是子区域，请手动填写该区域名。
+
+默认每 300 秒检查一次（允许 30–86400 秒），`A`/`AAAA` 分别使用 `api.ipify.org`/`api6.ipify.org` 获取对应公网地址，不经过代理；`IPURL` 可改为返回纯文本公网 IP 的 HTTPS 地址。首次同步先于节点与证书启动，后续失败按间隔重试，配置重载或退出会停止旧任务。相同配置的多个节点共用一个同步任务。缺少记录时创建（Cloudflare 新记录关闭代理）；已有记录仅在 IP 改变时更新，保留代理开关、TTL 和线路。`TTL` 仅用于新建记录；同一主机名有多条同类型记录时拒绝修改，需要先在控制台明确目标记录。关闭 DDNS 不会删除已有 DNS 记录，也不会发起 DDNS 网络请求。
+
 ## 检查配置文件
 
 菜单 `22. 检查配置文件` 或命令 `N2X check` 会校验整份 `/etc/N2X/config.json`，但不启动服务，也不申请证书。

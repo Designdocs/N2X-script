@@ -165,7 +165,7 @@ assert_config() {
 new_case "$xray_config"
 # 沿用 ApiHost/ApiKey；NodeID 4242；协议 8=hysteria；域名回车（默认沿用现有节点的）；
 # 证书 1=http；回车不再继续添加
-if ! run_append ";4242;8;;1;"; then
+if ! run_append ";4242;8;;1;n;"; then
     fail "在 xray 配置上追加 sing 节点失败"
 fi
 
@@ -205,7 +205,7 @@ fi
 
 # --- 2. 重复节点不写入 ------------------------------------------------------
 before="$(cat "${N2X_CONFIG_DIR}/config.json")"
-if run_append ";4242;8;;1;"; then
+if run_append ";4242;8;;1;n;"; then
     fail "重复节点应当被拒绝并返回非 0"
 fi
 if [[ "$before" != "$(cat "${N2X_CONFIG_DIR}/config.json")" ]]; then
@@ -213,7 +213,7 @@ if [[ "$before" != "$(cat "${N2X_CONFIG_DIR}/config.json")" ]]; then
 fi
 
 # 同 NodeID 但换个协议是合法的（面板里 ID 按协议各排各的）
-if ! run_append ";4242;9;;1;"; then
+if ! run_append ";4242;9;;1;n;"; then
     fail "同 NodeID 不同协议应当允许追加"
 fi
 assert_config "同 NodeID 不同协议追加后不符合预期" '
@@ -287,7 +287,7 @@ fi
 
 # 同意之后正常合并：y=确认丢注释；回车沿用 API；n=不开自定义 DNS；
 # NodeID 9；协议 9=tuic；域名回车（现有节点没有证书，取默认值）；证书 1=http；n=结束
-if ! run_append "y;;n;9;9;;1;n"; then
+if ! run_append "y;;n;9;9;;1;n;n"; then
     fail "带注释的配置应当在确认后可以追加"
 fi
 assert_config "带注释的配置合并后不符合预期" '
@@ -320,6 +320,34 @@ fi
 if [[ -f "${N2X_CONFIG_DIR}/config.json.bak" ]]; then
     fail "配置解析失败时不应产生备份"
 fi
+
+# Cloudflare credentials must survive appending a DNS node, including an env
+# reference (never expand it into a secret) and an existing legacy config.
+for dns_env in \
+    '{"CF_DNS_API_TOKEN":"scoped-test-token"}' \
+    '{"CF_DNS_API_TOKEN":"${CF_DNS_API_TOKEN}"}' \
+    '{"CF_API_KEY":"legacy-test-key","CLOUDFLARE_EMAIL":"ops@example.com"}'; do
+    cloudflare_config="$(printf '%s' "$xray_config" | python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+cert = data["Nodes"][0]["CertConfig"]
+cert["Provider"] = "cloudflare"
+cert["DNSEnv"] = json.loads(sys.argv[1])
+print(json.dumps(data))
+' "$dns_env")"
+    new_case "$cloudflare_config"
+    if ! run_append ";4242;8;;2;n;"; then
+        fail "追加 Cloudflare DNS 节点失败"
+    fi
+    assert_config "追加节点未保留 Cloudflare DNS 凭据" '
+import json, sys
+data = json.load(open(sys.argv[1]))
+old, new = data["Nodes"]
+assert new["CertConfig"]["CertMode"] == "dns"
+assert new["CertConfig"]["Provider"] == "cloudflare"
+assert new["CertConfig"]["DNSEnv"] == old["CertConfig"]["DNSEnv"], "DNS credentials changed"
+'
+done
 
 if (( failures > 0 )); then
     echo "${failures} append-protocol check(s) failed" >&2

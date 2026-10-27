@@ -126,6 +126,45 @@ select_cert_mode() {
     fi
 }
 
+# DDNS is offered only after a certificate was configured, and never inherited
+# as enabled merely because an existing node uses it.
+select_ddns() {
+    ddns_enabled=false
+    ddns_provider="cloudflare"
+    ddns_env='{}'
+    case "$certmode" in
+        http|dns|self|file) ;;
+        *) return ;;
+    esac
+    local answer provider_choice
+    read -rp "是否开启 DDNS 自动更新证书域名的公网 IP？[y/N]: " answer || answer=""
+    if [[ ! "$answer" =~ ^[Yy]([Ee][Ss])?$ ]]; then
+        return
+    fi
+    ddns_enabled=true
+    echo -e "${yellow}请选择 DDNS 服务商：${plain}"
+    echo "1. Cloudflare（默认，使用 API Token）"
+    echo "2. 阿里云国际平台（Alibaba Cloud DNS，使用 RAM AccessKey）"
+    read -rp "请输入 [1]: " provider_choice || provider_choice=""
+    case "$provider_choice" in
+        2)
+            ddns_provider="alidns"
+            ddns_env='{"ALICLOUD_ACCESS_KEY":"ExampleAccessKey","ALICLOUD_SECRET_KEY":"ExampleSecretKey"}'
+            ;;
+        ""|1) ;;
+        *)
+            echo -e "${red}无效的 DDNS 服务商，DDNS 保持关闭。${plain}"
+            ddns_enabled=false
+            ;;
+    esac
+    if [[ "$ddns_enabled" == true ]]; then
+        echo -e "${yellow}DDNS 默认更新 A 记录，每 300 秒检查一次。请检查 DDNSConfig 的域名与凭据后重启；AAAA 记录可手动设置 RecordType。${plain}"
+        if [[ "$ddns_provider" == cloudflare ]]; then
+            echo "Cloudflare 默认复用 CertConfig.DNSEnv.CF_DNS_API_TOKEN，也可在 DDNSConfig.DNSEnv 中单独填写。"
+        fi
+    fi
+}
+
 # 协议专属选项块。输出带 12 空格缩进、以逗号结尾的 JSON 片段，无内容时输出空。
 node_protocol_options() {
     case "$NodeType" in
@@ -228,6 +267,7 @@ add_node_config() {
 
     select_node_protocol
     select_cert_mode
+    select_ddns
 
     ipv6_support=$(check_ipv6_support)
     listen_ip="0.0.0.0"
@@ -262,9 +302,19 @@ $(node_extra_options)
                 "Email": "example@gmail.com",
                 "Provider": "cloudflare",
                 "DNSEnv": {
-                    "CF_API_KEY": "ExampleKEY",
-                    "CLOUDFLARE_EMAIL": "example@gmail.com"
+                    "CF_DNS_API_TOKEN": "ExampleTOKEN"
                 }
+            },
+            "DDNSConfig": {
+                "Enabled": $ddns_enabled,
+                "Provider": "$ddns_provider",
+                "Domain": "",
+                "ZoneName": "",
+                "RecordType": "A",
+                "Interval": 300,
+                "TTL": 600,
+                "IPURL": "",
+                "DNSEnv": $ddns_env
             }
         },
 EOF
@@ -347,7 +397,8 @@ config_help_block() {
         "Nodes.NaiveOptions": "Network 可填 tcp（HTTP/2）或 udp（HTTP/3），留空表示两者都监听。注意 naive 增删用户会重建监听器并断开在途连接。",
         "Nodes.CertConfig": "CertMode 可填 none/file/http/dns/self：file 使用现有证书，http/dns 自动申请，self 生成自签证书；RejectUnknownSni=true 时拒绝未知 SNI。hysteria2/tuic/naive/anytls 必须有可用证书，shadowtls 固定填 none。",
         "Nodes.CertPaths": "http/dns/self 模式的 CertFile 和 KeyFile 支持 {domain}；file 模式请填写现有证书的实际绝对路径。",
-        "Nodes.CertProvider": "Provider 和 DNSEnv 仅 dns 模式使用；Provider 填 lego 支持的名称，例如 cloudflare、alidns。"
+        "Nodes.CertProvider": "Provider 和 DNSEnv 仅 dns 模式使用；Provider 填 lego 支持的名称，例如 cloudflare、alidns。cloudflare 使用 CF_DNS_API_TOKEN，仅授权所需域名的 Zone/DNS/Edit 和 Zone/Zone/Read；Email 是证书账户邮箱。",
+        "Nodes.DDNSConfig": "Enabled 默认 false；Provider 支持 cloudflare、alidns（阿里云国际平台）；Domain 留空沿用 CertDomain，泛域名证书须单独填写具体主机名；ZoneName 留空按公共后缀推断主域名，托管子区域须手动填写。RecordType 为 A/AAAA；Interval 秒数默认 300；TTL 默认 600，仅新建记录使用。DNSEnv 留空时复用相同 Provider 的 CertConfig.DNSEnv。IPURL 留空使用 api.ipify.org / api6.ipify.org。"
 EOF
 }
 

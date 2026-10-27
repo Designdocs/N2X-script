@@ -142,10 +142,11 @@ CERT_PLACEHOLDERS = {
     'CertFile': ('', '/etc/N2X/fullchain-{domain}.cer'),
     'KeyFile': ('', '/etc/N2X/cert-{domain}.key'),
 }
-DNSENV_PLACEHOLDER = {
-    'CF_API_KEY': 'ExampleKEY',
-    'CLOUDFLARE_EMAIL': 'example@gmail.com',
-}
+DNSENV_PLACEHOLDERS = (
+    {'CF_DNS_API_TOKEN': 'ExampleTOKEN'},
+    # 兼容旧版生成器的占位值，不把它们当作真实凭据继承。
+    {'CF_API_KEY': 'ExampleKEY', 'CLOUDFLARE_EMAIL': 'example@gmail.com'},
+)
 
 
 def cert_donor(nodes):
@@ -191,8 +192,8 @@ def inherit_cert(new_node, donor):
         inherited.append(field)
 
     donor_env = donor.get('DNSEnv')
-    if isinstance(donor_env, dict) and donor_env and donor_env != DNSENV_PLACEHOLDER:
-        if cert.get('DNSEnv') in (None, {}, DNSENV_PLACEHOLDER):
+    if isinstance(donor_env, dict) and donor_env and donor_env not in DNSENV_PLACEHOLDERS:
+        if cert.get('DNSEnv') in (None, {}) + DNSENV_PLACEHOLDERS:
             cert['DNSEnv'] = dict(donor_env)
             inherited.append('DNSEnv')
     return inherited

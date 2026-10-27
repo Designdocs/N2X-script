@@ -114,6 +114,19 @@ EOF
         cat <<'EOF' > /etc/N2X/.env.example
 N2X_API_HOST=https://example.com
 N2X_API_KEY=please_fill_me
+
+N2X_CERT_DOMAIN=
+N2X_CERT_PROVIDER=cloudflare
+N2X_CERT_EMAIL=
+
+# Cloudflare API Token: Zone/DNS/Edit + Zone/Zone/Read, scoped to required zones.
+# Reference it in CertConfig.DNSEnv as "CF_DNS_API_TOKEN": "${CF_DNS_API_TOKEN}".
+CF_DNS_API_TOKEN=
+
+# Alibaba Cloud international RAM credentials for DDNS provider alidns.
+ALICLOUD_ACCESS_KEY=
+ALICLOUD_SECRET_KEY=
+# ALICLOUD_SECURITY_TOKEN=
 EOF
     fi
     

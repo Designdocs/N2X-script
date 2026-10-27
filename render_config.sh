@@ -58,7 +58,7 @@ load_env_file() {
     value="$(strip_wrapping_quotes "$value")"
 
     case "$key" in
-      N2X_API_HOST|N2X_API_KEY|N2X_CERT_DOMAIN|N2X_CERT_PROVIDER|N2X_CERT_EMAIL|CF_API_KEY|CLOUDFLARE_EMAIL)
+      N2X_API_HOST|N2X_API_KEY|N2X_CERT_DOMAIN|N2X_CERT_PROVIDER|N2X_CERT_EMAIL|CF_DNS_API_TOKEN|ALICLOUD_ACCESS_KEY|ALICLOUD_SECRET_KEY|ALICLOUD_SECURITY_TOKEN|CF_API_KEY|CLOUDFLARE_EMAIL)
         export "$key=$value"
         ;;
     esac
@@ -85,7 +85,7 @@ PY
 fi
 
 read_config_value() {
-  # $1: logical key (ApiHost|ApiKey|CertDomain|CertProvider|CertEmail|CF_API_KEY|CLOUDFLARE_EMAIL)
+  # $1: logical key (ApiHost|ApiKey|CertDomain|CertProvider|CertEmail|CF_DNS_API_TOKEN|CF_API_KEY|CLOUDFLARE_EMAIL)
   if ! command -v python3 >/dev/null 2>&1; then
     val=""
     case "$1" in
@@ -119,9 +119,12 @@ except Exception:
 
 def pick(obj, chain):
     for k in chain:
-        if not isinstance(obj, dict):
+        if isinstance(obj, list) and isinstance(k, int) and 0 <= k < len(obj):
+            obj = obj[k]
+        elif isinstance(obj, dict):
+            obj = obj.get(k)
+        else:
             return None
-        obj = obj.get(k)
     return obj
 
 chains = {
@@ -130,6 +133,7 @@ chains = {
     "CertDomain": ("Nodes", 0, "CertConfig", "CertDomain"),
     "CertProvider": ("Nodes", 0, "CertConfig", "Provider"),
     "CertEmail": ("Nodes", 0, "CertConfig", "Email"),
+    "CF_DNS_API_TOKEN": ("Nodes", 0, "CertConfig", "DNSEnv", "CF_DNS_API_TOKEN"),
     "CF_API_KEY": ("Nodes", 0, "CertConfig", "DNSEnv", "CF_API_KEY"),
     "CLOUDFLARE_EMAIL": ("Nodes", 0, "CertConfig", "DNSEnv", "CLOUDFLARE_EMAIL"),
 }
@@ -162,10 +166,12 @@ set_env_if_config_prefers "N2X_API_KEY" "ApiKey"
 set_env_if_config_prefers "N2X_CERT_DOMAIN" "CertDomain"
 set_env_if_config_prefers "N2X_CERT_PROVIDER" "CertProvider"
 set_env_if_config_prefers "N2X_CERT_EMAIL" "CertEmail"
+set_env_if_config_prefers "CF_DNS_API_TOKEN" "CF_DNS_API_TOKEN"
+# Keep rendering existing Global API Key configurations during migration.
 set_env_if_config_prefers "CF_API_KEY" "CF_API_KEY"
 set_env_if_config_prefers "CLOUDFLARE_EMAIL" "CLOUDFLARE_EMAIL"
 
 # Render final config; envsubst will leave placeholders empty if still unset.
-envsubst '$N2X_API_HOST $N2X_API_KEY $N2X_CERT_DOMAIN $N2X_CERT_PROVIDER $N2X_CERT_EMAIL $CF_API_KEY $CLOUDFLARE_EMAIL' <"$CONFIG_PATH" >"$OUTPUT_PATH"
+envsubst '$N2X_API_HOST $N2X_API_KEY $N2X_CERT_DOMAIN $N2X_CERT_PROVIDER $N2X_CERT_EMAIL $CF_DNS_API_TOKEN $ALICLOUD_ACCESS_KEY $ALICLOUD_SECRET_KEY $ALICLOUD_SECURITY_TOKEN $CF_API_KEY $CLOUDFLARE_EMAIL' <"$CONFIG_PATH" >"$OUTPUT_PATH"
 
 chmod 600 "$OUTPUT_PATH" 2>/dev/null || true
