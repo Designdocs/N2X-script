@@ -431,15 +431,21 @@ write_default_custom_outbound_json() {
     {
         "tag": "IPv4_out",
         "protocol": "freedom",
-        "settings": {
-            "domainStrategy": "UseIPv4v6"
+        "settings": {},
+        "streamSettings": {
+            "sockopt": {
+                "domainStrategy": "UseIPv4v6"
+            }
         }
     },
     {
         "tag": "IPv6_out",
         "protocol": "freedom",
-        "settings": {
-            "domainStrategy": "UseIPv6"
+        "settings": {},
+        "streamSettings": {
+            "sockopt": {
+                "domainStrategy": "UseIPv6"
+            }
         }
     },
     {
@@ -462,6 +468,168 @@ write_default_custom_outbound_json() {
     }
 ]
 EOF
+}
+
+# Upgrade existing outbound files without regenerating user configuration.
+# Optional arguments select explicit files; otherwise also discover custom xray
+# OutboundConfigPath values in config.json. Ordinary sourcing does not write;
+# the update_shell compatibility hook below runs only during a script upgrade.
+migrate_freedom_domain_strategy() {
+    local py
+    if command -v python3 >/dev/null 2>&1; then
+        py=python3
+    else
+        echo "freedom 配置迁移需要 python3，原文件未改动。" >&2
+        return 1
+    fi
+    "$py" - "${N2X_CONFIG_DIR:-/etc/N2X}" "$@" <<'PY'
+import json
+import os
+from pathlib import Path
+import stat
+import sys
+import tempfile
+
+
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("JSON 包含重复键，拒绝改写")
+        result[key] = value
+    return result
+
+
+def load(raw):
+    return json.loads(raw, object_pairs_hook=unique_object)
+
+
+def strategy(value):
+    allowed = {"", "asis", "useip", "useipv4", "useipv6", "useipv4v6", "useipv6v4",
+               "forceip", "forceipv4", "forceipv6", "forceipv4v6", "forceipv6v4"}
+    if not isinstance(value, str) or value.lower() not in allowed:
+        raise ValueError("domainStrategy/targetStrategy 无效，拒绝改写")
+    return value.lower() or "asis"
+
+
+def migrate(path):
+    # Resolve symlinks so replacing the target does not destroy the link.
+    path = path.resolve()
+    if not path.exists():
+        return
+    with path.open("rb") as handle:
+        raw = handle.read()
+        original_stat = os.fstat(handle.fileno())
+    outbounds = load(raw)
+    if not isinstance(outbounds, list) or any(not isinstance(o, dict) for o in outbounds):
+        raise ValueError("出站配置必须是对象数组，拒绝改写")
+    changed = 0
+    for index, outbound in enumerate(outbounds):
+        settings = outbound.get("settings")
+        if outbound.get("protocol") != "freedom" or not isinstance(settings, dict):
+            continue
+        if "domainStrategy" not in settings:
+            continue
+        legacy = settings["domainStrategy"]
+        legacy_strategy = strategy(legacy)
+        target_strategy = strategy(outbound.get("targetStrategy", ""))
+        # Xray ignores AsIs freedom strategies. A non-AsIs targetStrategy also
+        # takes precedence over freedom, so removing that legacy field suffices.
+        if legacy_strategy != "asis" and target_strategy == "asis":
+            stream = outbound.get("streamSettings")
+            if stream is None:
+                stream = {}
+            if not isinstance(stream, dict):
+                raise ValueError("出站[%d] streamSettings 不是对象" % index)
+            sockopt = stream.get("sockopt")
+            if sockopt is None:
+                sockopt = {}
+            if not isinstance(sockopt, dict):
+                raise ValueError("出站[%d] sockopt 不是对象" % index)
+            if "domainStrategy" in sockopt:
+                if strategy(sockopt["domainStrategy"]) != legacy_strategy:
+                    raise ValueError("出站[%d] 新旧 domainStrategy 冲突，请手动确认" % index)
+            else:
+                sockopt["domainStrategy"] = legacy
+            stream["sockopt"] = sockopt
+            outbound["streamSettings"] = stream
+        del settings["domainStrategy"]
+        changed += 1
+    if not changed:
+        return
+    payload = (json.dumps(outbounds, ensure_ascii=False, indent=4, allow_nan=False) + "\n").encode("utf-8")
+    backup = None
+    backup_complete = False
+    temporary = None
+    try:
+        # Unique names never overwrite an earlier backup. Both files retain the
+        # original owner and permissions, including private SOCKS credentials.
+        for is_backup, data in ((True, raw), (False, payload)):
+            suffix = ".bak.freedom-domain-strategy." if is_backup else ".tmp.freedom-domain-strategy."
+            fd, name = tempfile.mkstemp(prefix=path.name + suffix, dir=str(path.parent))
+            if is_backup:
+                backup = name
+            else:
+                temporary = name
+            with os.fdopen(fd, "wb") as handle:
+                current = os.fstat(handle.fileno())
+                if (current.st_uid, current.st_gid) != (original_stat.st_uid, original_stat.st_gid):
+                    os.fchown(handle.fileno(), original_stat.st_uid, original_stat.st_gid)
+                os.fchmod(handle.fileno(), stat.S_IMODE(original_stat.st_mode))
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+            if is_backup:
+                backup_complete = True
+        if path.read_bytes() != raw:
+            raise ValueError("文件在迁移期间被修改，拒绝覆盖")
+        os.replace(temporary, path)
+        temporary = None
+    finally:
+        if temporary is not None:
+            os.unlink(temporary)
+        if backup is not None and not backup_complete:
+            os.unlink(backup)
+    print("已迁移 %s 的 %d 个 freedom 旧字段；备份：%s" % (path, changed, backup))
+
+
+config_dir = Path(sys.argv[1])
+targets = [Path(p) for p in sys.argv[2:]]
+failed = False
+if not targets:
+    targets.append(config_dir / "custom_outbound.json")
+    config_path = config_dir / "config.json"
+    if config_path.exists():
+        try:
+            config = load(config_path.read_bytes())
+            for core in config.get("Cores", []):
+                if core.get("Type") != "xray":
+                    continue
+                path = core.get("OutboundConfigPath", "")
+                if path:
+                    path = os.path.expandvars(path)
+                    if "$" in path:
+                        raise ValueError("OutboundConfigPath 含未解析的环境变量")
+                    target = Path(path)
+                    if not target.is_absolute():
+                        target = Path(os.environ.get("N2X_INSTALL_DIR", "/usr/local/N2X")) / target
+                    targets.append(target)
+        except Exception:
+            print("无法解析 %s 的自定义出站路径；继续检查默认文件，自定义路径可作为迁移函数参数传入。" % config_path, file=sys.stderr)
+            failed = True
+seen = set()
+for target in targets:
+    try:
+        key = str(target.resolve())
+        if key in seen:
+            continue
+        seen.add(key)
+        migrate(target)
+    except Exception as error:
+        print("freedom 配置迁移失败（%s）：%s；该文件未改动。" % (target, error), file=sys.stderr)
+        failed = True
+sys.exit(1 if failed else 0)
+PY
 }
 
 # 规则顺序即匹配顺序：先 block，再 socks5-unlock，最后 IPv4_out 兜底。
@@ -555,3 +723,10 @@ write_default_route_json() {
 }
 EOF
 }
+
+# Released update_shell functions re-source this downloaded module but keep
+# executing their old function body. Run the new migration at that upgrade
+# entry point too, so an existing server is fixed on its first script upgrade.
+if [[ "${FUNCNAME[1]:-}" == "update_shell" ]]; then
+    migrate_freedom_domain_strategy || echo "部分 freedom 配置未能迁移，请查看上方原因；失败文件保留原内容。" >&2
+fi

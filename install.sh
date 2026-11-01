@@ -639,11 +639,19 @@ install_xray_side_files() {
     return 0
 }
 
+# Only the deprecated freedom field is migrated; failures keep the file intact.
+run_freedom_domain_strategy_migration() {
+    if declare -F migrate_freedom_domain_strategy >/dev/null; then
+        if ! migrate_freedom_domain_strategy; then
+            log_warn "部分 freedom 配置未能迁移，请查看上方原因；失败文件保留原内容。"
+        fi
+    else
+        log_warn "配置模块缺少 freedom 迁移功能，请更新管理脚本后重试。"
+    fi
+}
+
 # 升级用的一次性迁移：老机器的 route.json 是在 ruleTag 之前生成的，里面的 BT 规则
-# 没有标记，分组开关认不出来。install_xray_side_files 只在文件缺失时写入（升级时用
-# 户改过的内容要原样保留），所以这块只能靠迁移补。幂等，每次升级都跑没有副作用。
-#
-# 不 die：迁移失败只是分组开关暂时用不了，不该拦住整个安装。
+# 没有标记，分组开关认不出来。幂等，失败时保留文件并提示，不中断整个安装。
 run_download_block_migration() {
     local module="${1:-/usr/local/N2X/download_block.sh}"
 
@@ -1424,6 +1432,13 @@ EOF
         log_warn "未能加载最小诱饵 Web 服务安装模块；N2X 主服务仍将继续安装。"
     fi
 
+    # Prepare and migrate existing outbound files before starting the new core.
+    if ! install_xray_side_files; then
+        log_error "xray 配套文件未能全部写入 /etc/N2X/，请修复后执行：N2X generate"
+    fi
+    run_freedom_domain_strategy_migration
+    run_download_block_migration
+
     if [[ ! -f /etc/N2X/config.json ]]; then
         ensure_env_file
         cp config.json /etc/N2X/ || true
@@ -1453,16 +1468,6 @@ EOF
         fi
         first_install=false
     fi
-
-    # 这里不 die：二进制和服务都已经装好了，中断只会让用户既拿不到下面的使用说明
-    # 也不知道该修什么。报错并给出补救命令，安装继续走完。
-    if ! install_xray_side_files; then
-        log_error "xray 配套文件（dns.json / custom_outbound.json / route.json）未能全部写入 /etc/N2X/。"
-        log_error "使用 xray 核心时缺这些文件会导致核心启动即 panic，请修复后执行：N2X generate"
-    fi
-
-    # 配套文件就位之后再迁移：老配置里的 BT 规则要补上 ruleTag，分组开关才认得出。
-    run_download_block_migration
 
     # Cron: weekly geodata sync (Sat 04:00) and monthly update (1st 04:30)
     ensure_cron_job "0 4 * * 6" "/usr/bin/N2X update geodata -r >/var/log/N2X-geodata.log 2>&1"

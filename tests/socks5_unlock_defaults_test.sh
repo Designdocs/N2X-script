@@ -37,6 +37,10 @@ def generated_json(name):
 
 
 outbounds = generated_json("custom_outbound.json")
+for tag, strategy in (("IPv4_out", "UseIPv4v6"), ("IPv6_out", "UseIPv6")):
+    outbound = next(o for o in outbounds if o.get("tag") == tag)
+    assert "domainStrategy" not in outbound.get("settings", {})
+    assert outbound["streamSettings"]["sockopt"]["domainStrategy"] == strategy
 unlock = [outbound for outbound in outbounds if outbound.get("tag") == "socks5-unlock"]
 assert len(unlock) == 1
 server = unlock[0]["settings"]["servers"]

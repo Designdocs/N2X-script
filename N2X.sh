@@ -1185,6 +1185,9 @@ update_shell() {
         # 才能拿到 download_block_migrate，给老 route.json 里的 BT 规则补上 ruleTag。
         source /usr/local/N2X/config_gen.sh 2>/dev/null || true
         source /usr/local/N2X/download_block.sh 2>/dev/null || true
+        if declare -F migrate_freedom_domain_strategy >/dev/null; then
+            migrate_freedom_domain_strategy || echo -e "${yellow}部分 freedom 配置未能迁移，请查看上方原因；失败文件保留原内容。${plain}"
+        fi
         if declare -F download_block_migrate >/dev/null; then
             download_block_migrate || echo -e "${yellow}下载拦截标记迁移失败，配置未被改动。${plain}"
         fi

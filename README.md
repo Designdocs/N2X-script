@@ -29,6 +29,28 @@ xray 配套文件 `dns.json` / `custom_outbound.json` / `route.json` 的默认�
 明确报错——这三个文件是 `Cores.Paths` 指向的路径，xray 读不到会直接 panic。已存在的文件
 一律不覆盖。`tests/install_side_files_test.sh` 覆盖这段逻辑。
 
+freedom 出站的解析策略使用 `streamSettings.sockopt.domainStrategy`，默认 `IPv4_out`
+仍为 `UseIPv4v6`，`IPv6_out` 仍为 `UseIPv6`。`N2X update` 在启动新内核前自动迁移
+旧字段；`N2X update_shell` 也会执行迁移，兼容已发布的旧版更新函数，首次升级即可生效。
+
+迁移检查 `/etc/N2X/custom_outbound.json`，以及 `config.json` 中 xray 核心自定义的
+`OutboundConfigPath`。只移动 freedom 的旧字段，保留原策略值、其他出站及顺序、已有
+`settings`、`streamSettings`、`sockopt` 内容。旧值为 `AsIs` 时只删除旧字段，保留已有
+sockopt 策略；有生效的 `targetStrategy` 时也只删除被它覆盖的旧字段。新旧策略冲突、
+重复 JSON 键、文件解析或写入失败时，保留该文件并报告原因。
+
+修改前生成原始内容备份 `<文件名>.bak.freedom-domain-strategy.<随机后缀>`，备份和新文件
+保留原所有者及权限，采用临时文件原子替换；再次迁移无改动时不写文件、不增加备份。
+JSON 缩进会规范化。非标准 JSON 的主配置无法自动发现自定义路径时会提示，可显式指定：
+
+```bash
+source /usr/local/N2X/config_gen.sh
+migrate_freedom_domain_strategy /实际路径/custom_outbound.json
+```
+
+迁移不会重建节点或覆盖解锁出站。只升级管理脚本后，执行 `N2X check`，通过后执行
+`systemctl restart N2X` 重新加载配置。
+
 ## Cloudflare DNS 证书
 
 Cloudflare 的 DNS 证书配置使用 `DNSEnv.CF_DNS_API_TOKEN`。生成的 `ExampleTOKEN` 需要替换为实际 API Token，权限仅授予所需域名的 `Zone / DNS / Edit` 和 `Zone / Zone / Read`，区域资源选择 `Include / Specific zone`。可参考 [Cloudflare 创建说明](https://developers.cloudflare.com/fundamentals/api/get-started/create-token/)和 [lego 配置说明](https://go-acme.github.io/lego/dns/cloudflare/)。指定 Zone 的权限覆盖其中所有 DNS 记录。
