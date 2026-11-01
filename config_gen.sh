@@ -728,5 +728,6 @@ EOF
 # executing their old function body. Run the new migration at that upgrade
 # entry point too, so an existing server is fixed on its first script upgrade.
 if [[ "${FUNCNAME[1]:-}" == "update_shell" ]]; then
-    migrate_freedom_domain_strategy || echo "部分 freedom 配置未能迁移，请查看上方原因；失败文件保留原内容。" >&2
+    # Old updaters source this file with stderr redirected to /dev/null.
+    migrate_freedom_domain_strategy 2>&1 || echo "部分 freedom 配置未能迁移，请查看上方原因；失败文件保留原内容。"
 fi

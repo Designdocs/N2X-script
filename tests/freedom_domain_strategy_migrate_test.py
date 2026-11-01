@@ -147,8 +147,15 @@ class MigrationTests(unittest.TestCase):
     def test_released_update_shell_bootstraps_migration(self):
         self.check_update_shell(legacy=True)
 
-    def check_update_shell(self, legacy):
+    def test_released_update_shell_reports_conflicts_without_changing_file(self):
+        self.check_update_shell(legacy=True, conflict=True)
+
+    def check_update_shell(self, legacy, conflict=False):
         self.write([{"protocol": "freedom", "settings": {"domainStrategy": "UseIPv6"}}])
+        if conflict:
+            self.write([{"protocol": "freedom", "settings": {"domainStrategy": "UseIPv6"},
+                        "streamSettings": {"sockopt": {"domainStrategy": "UseIPv4"}}}])
+        raw = self.path.read_bytes()
         text = (REPO / "N2X.sh").read_text()
         body = text.split("update_shell() {\n", 1)[1].split("\n}\n", 1)[0]
         if legacy:
@@ -166,8 +173,13 @@ download_managed_shell_file() { cp "$TEST_REPO/${1##*/}" "$2"; }
         result = subprocess.run(["bash", "-c", prelude + "\nupdate_shell() {\n" + body + "\n}\nupdate_shell\n"],
                                 env=dict(self.env, TEST_REPO=str(REPO)), capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertNotIn("domainStrategy", json.loads(self.path.read_bytes())[0]["settings"])
-        self.assertEqual(len(self.backups()), 1)
+        if conflict:
+            self.assertEqual(self.path.read_bytes(), raw)
+            self.assertEqual(self.backups(), [])
+            self.assertIn("冲突", result.stdout)
+        else:
+            self.assertNotIn("domainStrategy", json.loads(self.path.read_bytes())[0]["settings"])
+            self.assertEqual(len(self.backups()), 1)
 
     def test_ordinary_source_does_not_migrate(self):
         self.write([{"protocol": "freedom", "settings": {"domainStrategy": "UseIP"}}])
