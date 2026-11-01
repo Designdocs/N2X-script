@@ -383,7 +383,7 @@ select_append_api_info() {
     if [[ "$existing_host" == *'$'* || "$existing_key" == *'$'* ]]; then
         api_host_val="$existing_host"
         api_key_val="$existing_key"
-        echo -e "${green}现有节点使用环境变量占位符（$existing_host），新节点沿用同样的写法，实际值仍由 $cfg_dir/.env 提供。${plain}"
+        echo -e "${green}现有节点使用环境变量占位符（${existing_host}），新节点沿用同样的写法，实际值仍由 $cfg_dir/.env 提供。${plain}"
         return 0
     fi
 
@@ -439,7 +439,7 @@ append_node_configs() {
     fi
 
     if [[ ! -f "$cfg" ]]; then
-        echo -e "${red}未找到 $cfg。${plain}"
+        echo -e "${red}未找到 ${cfg}。${plain}"
         echo -e "${yellow}还没有配置可供追加，请先使用「生成 N2X 配置文件」创建初始配置。${plain}"
         return 1
     fi
@@ -464,7 +464,7 @@ append_node_configs() {
 $facts
 EOF
 
-    echo -e "${yellow}当前配置概况（$cfg）：${plain}"
+    echo -e "${yellow}当前配置概况（${cfg}）：${plain}"
     echo -e "  已有节点：${node_count} 个"
     if [[ -n "$node_table" ]]; then
         echo "$node_table"
@@ -576,6 +576,6 @@ EOF
         ensure_xray_side_files "$cfg_dir"
     fi
 
-    echo -e "${green}协议已追加到 $cfg（原配置已备份为 $cfg.bak）${plain}"
+    echo -e "${green}协议已追加到 ${cfg}（原配置已备份为 ${cfg}.bak）${plain}"
     return 0
 }

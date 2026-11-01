@@ -8,6 +8,31 @@ repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 command -v python3 >/dev/null || { echo "python3 is required" >&2; exit 1; }
 
+# Bash 3.2 can include bytes from adjacent Chinese punctuation in an unbraced
+# variable name under UTF-8. Exercise the real flow in both locale families.
+if [[ "${N2X_APPEND_LOCALE_CHILD:-0}" != 1 ]]; then
+    utf8_locale="$(locale -a | python3 -c '
+import sys
+locales = [line.strip() for line in sys.stdin]
+for preferred in ("c.utf8", "c.utf-8", "en_us.utf-8", "en_us.utf8"):
+    found = next((name for name in locales if name.lower() == preferred), None)
+    if found:
+        print(found)
+        break
+')"
+    locales=(C)
+    if [[ -n "$utf8_locale" ]]; then
+        locales+=("$utf8_locale")
+    else
+        echo "SKIP: no installed UTF-8 locale; running append flow under C only" >&2
+    fi
+    for test_locale in "${locales[@]}"; do
+        echo "append protocol locale: ${test_locale}"
+        LC_ALL="$test_locale" N2X_APPEND_LOCALE_CHILD=1 "$BASH" "${BASH_SOURCE[0]}"
+    done
+    exit 0
+fi
+
 # check_ipv6_support 会调 `ip`，macOS 和精简容器里没有，跟协议矩阵测试一样打桩。
 stub_dir="$(mktemp -d)"
 work_root="$(mktemp -d)"
@@ -29,6 +54,9 @@ red="" green="" yellow="" plain=""
 failures=0
 fail() {
     echo "FAIL: $*" >&2
+    if [[ -n "${append_log:-}" && -f "$append_log" ]]; then
+        tail -n 20 "$append_log" >&2
+    fi
     failures=$((failures + 1))
 }
 
@@ -132,10 +160,11 @@ new_case() {
 run_append() {
     local dialogue="$1" input_file pid waited=0 rc
     input_file="$(mktemp "${work_root}/input.XXXXXX")"
+    append_log="${input_file}.log"
     printf '%s\n' "$dialogue" | tr ';' '\n' > "$input_file"
 
     set +e
-    ( append_node_configs >/dev/null 2>&1 <"$input_file" ) &
+    ( append_node_configs >"$append_log" 2>&1 <"$input_file" ) &
     pid=$!
     while kill -0 "$pid" 2>/dev/null; do
         if (( waited >= 200 )); then
@@ -306,6 +335,9 @@ assert new["CertConfig"]["CertDomain"] == "all.nom-loc.com", new["CertConfig"]
 N2X_CONFIG_DIR="$(mktemp -d "${work_root}/case.XXXXXX")"
 if run_append ";1;1;1;n"; then
     fail "没有 config.json 时应当直接失败并提示先生成配置"
+fi
+if ! grep -Fq "未找到 ${N2X_CONFIG_DIR}/config.json。" "$append_log"; then
+    fail "缺少配置时没有输出完整路径"
 fi
 
 # --- 6. 语法坏掉的配置绝不能被覆盖 -----------------------------------------
