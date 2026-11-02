@@ -515,11 +515,15 @@ download_managed_shell_file() {
         return 1
     fi
 
-    if ! bash -n "$temporary_path"; then
+    # 替换前补齐权限，避免后续模块安装失败时留下不可执行的管理入口。
+    if ! bash -n "$temporary_path" || ! chmod 755 "$temporary_path"; then
         rm -f "$temporary_path"
         return 1
     fi
-    mv -f "$temporary_path" "$target_path"
+    if ! mv -f "$temporary_path" "$target_path"; then
+        rm -f "$temporary_path"
+        return 1
+    fi
 }
 
 install_managed_shell_file() {
@@ -532,11 +536,15 @@ install_managed_shell_file() {
 
     temporary_path="$(mktemp "${target_path}.tmp.XXXXXX")" || return 1
     if ! cp "${SCRIPT_DIR}/${local_name}" "$temporary_path" \
-        || ! bash -n "$temporary_path"; then
+        || ! bash -n "$temporary_path" \
+        || ! chmod 755 "$temporary_path"; then
         rm -f "$temporary_path"
         return 1
     fi
-    mv -f "$temporary_path" "$target_path"
+    if ! mv -f "$temporary_path" "$target_path"; then
+        rm -f "$temporary_path"
+        return 1
+    fi
 }
 
 install_support_scripts() {

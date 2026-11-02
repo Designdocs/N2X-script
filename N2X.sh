@@ -1153,11 +1153,15 @@ download_managed_shell_file() {
         return 1
     fi
 
-    if ! bash -n "$temporary_path"; then
+    # 先设置执行权限再替换入口，避免更新中断后 N2X 无法运行。
+    if ! bash -n "$temporary_path" || ! chmod 755 "$temporary_path"; then
         rm -f "$temporary_path"
         return 1
     fi
-    mv -f "$temporary_path" "$target_path"
+    if ! mv -f "$temporary_path" "$target_path"; then
+        rm -f "$temporary_path"
+        return 1
+    fi
 }
 
 update_shell() {
