@@ -50,7 +50,7 @@ Before=N2X.service
 [Service]
 Type=simple
 EnvironmentFile=-/etc/N2X/artx-decoy.env
-ExecStart=/usr/local/N2X/N2X decoy serve
+ExecStart=/bin/sh /usr/local/N2X/run.sh decoy serve
 Restart=always
 RestartSec=5
 NoNewPrivileges=true
@@ -74,8 +74,8 @@ artx_decoy_write_openrc_service() {
 
 name="Service Status Endpoint"
 description="Local service status endpoint"
-command="/usr/local/N2X/N2X"
-command_args="decoy serve"
+command="/bin/sh"
+command_args="/usr/local/N2X/run.sh decoy serve"
 command_user="root"
 pidfile="/run/N2X-artx-decoy.pid"
 command_background="yes"

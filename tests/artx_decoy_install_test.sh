@@ -27,7 +27,7 @@ fi
 artx_decoy_install_service systemd
 unit_path="$fixture_root/etc/systemd/system/N2X-artx-decoy.service"
 grep -Fq 'EnvironmentFile=-/etc/N2X/artx-decoy.env' "$unit_path"
-grep -Fq 'ExecStart=/usr/local/N2X/N2X decoy serve' "$unit_path"
+grep -Fq 'ExecStart=/bin/sh /usr/local/N2X/run.sh decoy serve' "$unit_path"
 if grep -Fq '60443' "$unit_path"; then
     echo 'systemd unit must not hardcode the default port' >&2
     exit 1
@@ -35,7 +35,7 @@ fi
 
 artx_decoy_install_service alpine
 openrc_path="$fixture_root/etc/init.d/N2X-artx-decoy"
-grep -Fq 'command_args="decoy serve"' "$openrc_path"
+grep -Fq 'command_args="/usr/local/N2X/run.sh decoy serve"' "$openrc_path"
 grep -Fq 'start_pre()' "$openrc_path"
 if grep -Fq 'env_file=' "$openrc_path"; then
     echo 'OpenRC must explicitly export the decoy environment' >&2

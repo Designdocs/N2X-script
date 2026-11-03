@@ -571,6 +571,11 @@ install_support_scripts() {
         "https://raw.githubusercontent.com/Designdocs/N2X-script/main/render_config.sh" || return 1
 
     install_managed_shell_file \
+        "run.sh" \
+        "/usr/local/N2X/run.sh" \
+        "https://raw.githubusercontent.com/Designdocs/N2X-script/main/run.sh" || return 1
+
+    install_managed_shell_file \
         "artx_decoy.sh" \
         "/usr/local/N2X/artx_decoy.sh" \
         "https://raw.githubusercontent.com/Designdocs/N2X-script/main/artx_decoy.sh" || return 1
@@ -1378,8 +1383,8 @@ install_N2X() {
 name="N2X"
 description="N2X"
 
-command="/usr/local/N2X/N2X"
-command_args="server"
+command="/bin/sh"
+command_args="/usr/local/N2X/run.sh server"
 command_user="root"
 
 pidfile="/run/N2X.pid"
@@ -1438,7 +1443,7 @@ LimitCORE=infinity
 LimitNOFILE=999999
 WorkingDirectory=/usr/local/N2X/
 ExecStartPre=/bin/sh /usr/local/N2X/render_config.sh
-ExecStart=/usr/local/N2X/N2X server --config /run/N2X/config.json
+ExecStart=/bin/sh /usr/local/N2X/run.sh server --config /run/N2X/config.json
 Restart=always
 RestartSec=10
 NoNewPrivileges=true
