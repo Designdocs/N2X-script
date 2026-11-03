@@ -1,5 +1,5 @@
 #!/bin/bash
-# 在已有 config.json 上追加协议节点（与「生成配置」的整份重写相对）。
+# 在已有 config.json 上追加或按 NodeID 删除节点。
 #
 # 依赖 config_gen.sh 提供的 add_node_config / build_cores_config，调用方（N2X.sh）
 # 先 source config_gen.sh 再 source 本文件。install.sh 会把两个文件一起装到
@@ -27,7 +27,7 @@ n2x_python_bin() {
     fi
 }
 
-# 唯一的 python 入口，两种模式：
+# 唯一的 python 入口：
 #
 #   facts <config.json>
 #       固定输出 8 行（是否需要清理注释 / 是否已有 xray / 是否已有 sing /
@@ -38,6 +38,11 @@ n2x_python_bin() {
 #       把 nodes.json 追加进 Nodes、把 cores.json 里缺失的核心追加进 Cores，
 #       结果写入 out.json（不改动 config.json）。退出码：0 已写出、2 解析失败、
 #       3 没有任何新增（全是重复节点）。
+#
+#   list-nodes <config.json>
+#       输出是否清理过注释、节点数、NodeType=NodeID 清单。
+#   delete <config.json> <NodeID> <out.json>
+#       删除所有匹配 ID 的完整节点，保留其他配置。退出码 3 表示 ID 不存在。
 n2x_config_py() {
     local py
     py="$(n2x_python_bin)" || return 127
@@ -251,6 +256,46 @@ def do_facts(path):
     print('\n'.join(out))
 
 
+def deletion_config(path):
+    data, trimmed = load_config(path)
+    if not isinstance(data, dict):
+        raise ValueError('config.json 的顶层不是一个 JSON 对象')
+    nodes = data.get('Nodes', [])
+    if not isinstance(nodes, list) or any(not isinstance(node, dict) for node in nodes):
+        raise ValueError('Nodes 必须是节点对象数组')
+    return data, nodes, trimmed
+
+
+def do_list_nodes(path):
+    _, nodes, trimmed = deletion_config(path)
+    print('true' if trimmed else 'false')
+    print(len(nodes))
+    print(', '.join('{0}={1}'.format(
+        one_line(node.get('NodeType')) or '?',
+        str(node.get('NodeID', '?')),
+    ) for node in nodes))
+
+
+def do_delete(config_path, node_id, out_path):
+    if not node_id or any(c not in '0123456789' for c in node_id):
+        raise ValueError('NodeID 必须是非负整数')
+    node_id = str(int(node_id))
+    data, nodes, _ = deletion_config(config_path)
+    remaining = [node for node in nodes if str(node.get('NodeID')) != node_id]
+    removed = len(nodes) - len(remaining)
+    if not removed:
+        print('未找到 NodeID={0}，配置未改动。'.format(node_id))
+        sys.exit(3)
+    data['Nodes'] = remaining
+    text = json.dumps(data, ensure_ascii=False, indent=4)
+    if not isinstance(text, type(u'')):
+        text = text.decode('utf-8')
+    with io.open(out_path, 'w', encoding='utf-8') as handle:
+        handle.write(text)
+        handle.write(u'\n')
+    print('已删除 NodeID={0} 的完整节点配置，共 {1} 段。'.format(node_id, removed))
+
+
 def do_merge(config_path, nodes_path, cores_path, out_path):
     data, _ = load_config(config_path)
     if not isinstance(data, dict):
@@ -335,6 +380,10 @@ try:
         do_facts(sys.argv[2])
     elif mode == 'merge':
         do_merge(sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5])
+    elif mode == 'list-nodes':
+        do_list_nodes(sys.argv[2])
+    elif mode == 'delete':
+        do_delete(sys.argv[2], sys.argv[3], sys.argv[4])
     else:
         sys.stderr.write('unknown mode: {0}\n'.format(mode))
         sys.exit(2)
@@ -577,5 +626,72 @@ EOF
     fi
 
     echo -e "${green}协议已追加到 ${cfg}（原配置已备份为 ${cfg}.bak）${plain}"
+    return 0
+}
+
+# 只改 Nodes 中指定 ID 的对象；配置写入成功后由管理脚本重启服务。
+delete_node_configs() {
+    local cfg facts trimmed node_count node_table node_id tmp_dir result
+    cfg="$(n2x_config_dir)/config.json"
+
+    if ! n2x_python_bin >/dev/null; then
+        echo -e "${red}未检测到 python3/python，请先安装 python3 后重试。${plain}"
+        return 1
+    fi
+    if [[ ! -f "$cfg" ]]; then
+        echo -e "${red}未找到 ${cfg}，没有可删除的节点配置。${plain}"
+        return 1
+    fi
+    if ! facts="$(n2x_config_py list-nodes "$cfg")"; then
+        echo -e "${red}${cfg} 解析失败，配置未改动。${plain}"
+        return 1
+    fi
+    {
+        IFS= read -r trimmed
+        IFS= read -r node_count
+        node_table="$(cat)"
+    } <<< "$facts"
+
+    if [[ "$node_count" == 0 ]]; then
+        echo -e "${yellow}当前没有节点可删除，配置未改动。${plain}"
+        return 1
+    fi
+    echo -e "${yellow}当前节点（协议=NodeID）：${plain}"
+    printf '%s\n' "$node_table"
+    echo -e "${yellow}输入 ID 即删除该 ID 的全部节点配置；原配置会备份为 ${cfg}.bak。${plain}"
+    if [[ "$trimmed" == true ]]; then
+        echo -e "${yellow}保存时会转为标准 JSON，注释将保留在备份文件中。${plain}"
+    fi
+    if ! read -rp "请输入要删除的 NodeID（回车取消）：" node_id || [[ -z "$node_id" ]]; then
+        echo -e "${yellow}已取消，配置未改动。${plain}"
+        return 1
+    fi
+    if [[ ! "$node_id" =~ ^[0-9]+$ ]]; then
+        echo -e "${red}NodeID 必须是非负整数，配置未改动。${plain}"
+        return 1
+    fi
+
+    tmp_dir="$(mktemp -d)" || return 1
+    if ! result="$(n2x_config_py delete "$cfg" "$node_id" "$tmp_dir/config.json")"; then
+        rm -rf "$tmp_dir"
+        [[ -z "$result" ]] || printf '%s\n' "$result"
+        echo -e "${yellow}未删除任何节点，配置未改动。${plain}"
+        return 1
+    fi
+    if ! cp -f "$cfg" "$cfg.bak"; then
+        rm -rf "$tmp_dir"
+        echo -e "${red}备份 ${cfg}.bak 失败，已中止删除。${plain}"
+        return 1
+    fi
+    chmod 600 "$cfg.bak" 2>/dev/null || true
+    # 保留原文件的属主、权限和 inode，与追加配置的写入方式一致。
+    if ! cat "$tmp_dir/config.json" > "$cfg"; then
+        rm -rf "$tmp_dir"
+        echo -e "${red}写入 ${cfg} 失败，请用 ${cfg}.bak 恢复。${plain}"
+        return 1
+    fi
+    rm -rf "$tmp_dir"
+    printf '%s\n' "$result"
+    echo -e "${green}已保存至 ${cfg}，原配置已备份为 ${cfg}.bak。${plain}"
     return 0
 }

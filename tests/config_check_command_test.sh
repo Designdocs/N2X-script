@@ -30,8 +30,8 @@ assert '"check") check_install 0 && check_config_file 0 ;;' in dispatch, "缺少
 menu = n2x[n2x.index("\nshow_menu() {"):n2x.rindex('if [[ $# > 0 ]]; then')]
 assert "22.${plain} 检查配置文件" in menu, "主菜单没有检查配置文件入口"
 assert "22) check_install && check_config_file ;;" in menu, "主菜单 22 未接到 check_config_file"
-assert "23.${plain} 退出脚本" in menu and "23) exit ;;" in menu, "退出项应顺延到 23"
-assert "[0-23]" in menu and "[0-22]" not in menu, "菜单编号范围未同步更新"
+assert "24.${plain} 退出脚本" in menu and "24) exit ;;" in menu, "退出项应顺延到 24"
+assert "[0-24]" in menu and "[0-22]" not in menu, "菜单编号范围未同步更新"
 
 assert "N2X check" in n2x[n2x.index("\nshow_usage() {"):n2x.index("\nshow_menu() {")], "使用说明缺少 N2X check"
 WIRING

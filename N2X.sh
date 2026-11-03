@@ -1509,6 +1509,21 @@ add_protocol_config() {
     fi
 }
 
+delete_node_config() {
+    local code=1
+    if ! declare -F delete_node_configs >/dev/null; then
+        echo -e "${red}错误：config_append.sh 缺失或版本过旧，请执行 N2X update_shell 升级脚本后重试。${plain}"
+    elif delete_node_configs; then
+        echo -e "${yellow}正在重启 N2X 服务使删除生效，现有连接会短暂重连...${plain}"
+        restart 0
+        code=$?
+    fi
+    if [[ $# == 0 ]]; then
+        before_show_menu
+    fi
+    return "$code"
+}
+
 # 放开防火墙端口
 open_ports() {
     systemctl stop firewalld.service 2>/dev/null
@@ -1543,6 +1558,7 @@ show_usage() {
     echo "N2X x25519       - 生成 x25519 密钥"
     echo "N2X generate     - 生成 N2X 配置文件（重建，会覆盖已有节点）"
     echo "N2X addnode      - 在已有配置上增加协议配置"
+    echo "N2X delnode      - 列出现有节点并按 NodeID 删除节点配置"
     echo "N2X check        - 检查 N2X 配置文件（不启动服务）"
     echo "N2X update       - 更新 N2X"
     echo "N2X update x.x.x - 安装 N2X 指定版本"
@@ -1586,11 +1602,12 @@ show_menu() {
   ${green}20.${plain} 下载拦截管理（BT/P2P 启停）
   ${green}21.${plain} 出口解锁设置（自定义 http/socks 分流）
   ${green}22.${plain} 检查配置文件（不启动服务）
-  ${green}23.${plain} 退出脚本
+  ${green}23.${plain} 删除节点（按 NodeID 删除整段配置）
+  ${green}24.${plain} 退出脚本
  "
  #后续更新可加入上方字符串中
     show_status
-    echo && read -rp "请输入选择 [0-23]: " num
+    echo && read -rp "请输入选择 [0-24]: " num
 
     case "${num}" in
         0) config ;;
@@ -1616,8 +1633,9 @@ show_menu() {
         20) download_block_menu ;;
         21) outbound_unlock_menu ;;
         22) check_install && check_config_file ;;
-        23) exit ;;
-        *) echo -e "${red}请输入正确的数字 [0-23]${plain}" ;;
+        23) delete_node_config ;;
+        24) exit ;;
+        *) echo -e "${red}请输入正确的数字 [0-24]${plain}" ;;
     esac
 }
 
@@ -1640,6 +1658,7 @@ if [[ $# > 0 ]]; then
         "config") config $* ;;
         "generate") generate_config_file ;;
         "addnode"|"add_node"|"append") add_protocol_config 0 ;;
+        "delnode"|"delete_node") delete_node_config 0 ;;
         "check") check_install 0 && check_config_file 0 ;;
         "install") check_uninstall 0 && install 0 ;;
         "uninstall") check_install 0 && uninstall 0 ;;
