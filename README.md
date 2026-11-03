@@ -83,6 +83,18 @@ DDNS 默认关闭。安装、生成配置和追加节点共用同一套引导：
 
 默认每 300 秒检查一次（允许 30–86400 秒），`A`/`AAAA` 分别使用 `api.ipify.org`/`api6.ipify.org` 获取对应公网地址，不经过代理；`IPURL` 可改为返回纯文本公网 IP 的 HTTPS 地址。首次同步先于节点与证书启动，后续失败按间隔重试，配置重载或退出会停止旧任务。相同配置的多个节点共用一个同步任务。缺少记录时创建（Cloudflare 新记录关闭代理）；已有记录仅在 IP 改变时更新，保留代理开关、TTL 和线路。`TTL` 仅用于新建记录；同一主机名有多条同类型记录时拒绝修改，需要先在控制台明确目标记录。关闭 DDNS 不会删除已有 DNS 记录，也不会发起 DDNS 网络请求。
 
+## Geo 数据更新
+
+`N2X update geodata` 独立下载 `geoip.dat` 和 `geosite.dat` 到 `/etc/N2X/`，不更新程序。数据源使用发行包同源的 [Loyalsoldier/v2ray-rules-dat](https://github.com/Loyalsoldier/v2ray-rules-dat)，四份下载（两份数据和各自 SHA-256 校验）固定到同一提交。全部下载并校验后才替换；失败保留原数据，文件替换或服务重启命令失败会恢复备份。
+
+安装脚本保留每周六服务器时间 04:00 的计划：
+
+```cron
+0 4 * * 6 /usr/bin/N2X update geodata -r >/var/log/N2X-geodata.log 2>&1
+```
+
+`-r` / `--restart` 仅在数据变化时重启已运行的 N2X。文件相同不重启，停止的服务不会启动；不带参数只下载，下次启动或重启时生效。`N2X update_shell` 会一并更新 `geodata.sh` 模块，修复已有 cron，无需升级二进制；旧脚本升级后漏装模块时，首次 Geo 更新会自动补装。程序安装/升级只补充缺失或空文件，保留已有独立更新和自定义数据。自定义 `AssetPath` 时设置 `N2X_GEODATA_DIR`；可用 `N2X_GEODATA_REVISION` 的 40 位提交 SHA 固定版本。目标目录的 `geodata.revision.txt` 记录数据来源。
+
 ## 检查配置文件
 
 菜单 `22. 检查配置文件` 或命令 `N2X check` 会校验整份 `/etc/N2X/config.json`，但不启动服务，也不申请证书。

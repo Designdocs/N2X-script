@@ -585,6 +585,11 @@ install_support_scripts() {
         "/usr/local/N2X/outbound_unlock.sh" \
         "https://raw.githubusercontent.com/Designdocs/N2X-script/main/outbound_unlock.sh" || return 1
 
+    install_managed_shell_file \
+        "geodata.sh" \
+        "/usr/local/N2X/geodata.sh" \
+        "https://raw.githubusercontent.com/Designdocs/N2X-script/main/geodata.sh" || return 1
+
     chmod +x /usr/bin/N2X || return 1
     chmod +x /usr/local/N2X/render_config.sh >/dev/null 2>&1 || return 1
     chmod +x /usr/local/N2X/config_gen.sh >/dev/null 2>&1 || return 1
@@ -592,6 +597,7 @@ install_support_scripts() {
     chmod +x /usr/local/N2X/artx_decoy.sh >/dev/null 2>&1 || return 1
     chmod +x /usr/local/N2X/download_block.sh >/dev/null 2>&1 || return 1
     chmod +x /usr/local/N2X/outbound_unlock.sh >/dev/null 2>&1 || return 1
+    chmod +x /usr/local/N2X/geodata.sh >/dev/null 2>&1 || return 1
     return 0
 }
 
@@ -1257,6 +1263,29 @@ env_ready_for_start() {
     return 0
 }
 
+install_geodata_files() {
+    local target_dir="${1:-/etc/N2X}" package_dir="${2:-/usr/local/N2X}"
+    local name temporary_path
+    mkdir -p "$target_dir" || return 1
+    for name in geoip.dat geosite.dat; do
+        # A program update must not downgrade the separately maintained data.
+        [[ ! -s "$target_dir/$name" ]] || continue
+        if [[ ! -s "$package_dir/$name" ]]; then
+            log_error "安装包缺少 Geo 数据：${name}"
+            return 1
+        fi
+        temporary_path="$(mktemp "${target_dir}/.${name}.XXXXXX")" || return 1
+        if ! cp "$package_dir/$name" "$temporary_path" \
+            || ! chmod 644 "$temporary_path" \
+            || ! mv -f "$temporary_path" "$target_dir/$name"; then
+            rm -f "$temporary_path"
+            log_error "安装 Geo 数据失败：${name}"
+            return 1
+        fi
+    done
+    return 0
+}
+
 install_N2X() {
     local staging_root=""
     local extracted_dir=""
@@ -1340,8 +1369,7 @@ install_N2X() {
             log_info "已迁移旧配置，并备份为 /etc/N2X/config.json.bak"
         fi
     fi
-    cp geoip.dat /etc/N2X/
-    cp geosite.dat /etc/N2X/
+    install_geodata_files || die "安装 Geo 数据失败，已有数据已保留"
     if [[ x"${release}" == x"alpine" ]]; then
         rm /etc/init.d/N2X -f
         cat <<'EOF' > /etc/init.d/N2X
@@ -1477,7 +1505,7 @@ EOF
         first_install=false
     fi
 
-    # Cron: weekly geodata sync (Sat 04:00) and monthly update (1st 04:30)
+    # Independent geodata sync (Sat 04:00, restart only on change), monthly program update.
     ensure_cron_job "0 4 * * 6" "/usr/bin/N2X update geodata -r >/var/log/N2X-geodata.log 2>&1"
     ensure_cron_job "30 4 1 * *" "/usr/bin/N2X update -r >/var/log/N2X-update.log 2>&1"
     if [ ! -L /usr/bin/n2x ]; then

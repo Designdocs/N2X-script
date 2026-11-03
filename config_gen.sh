@@ -377,6 +377,7 @@ build_cores_config() {
 config_help_block() {
     cat <<'EOF'
         "Log": "Level 可填 debug/info/warn/error；Output 留空输出到控制台，否则填写日志文件绝对路径。",
+        "ScheduledRestart": "需支持此字段的新版二进制；默认关闭，手动添加此配置段并将 Enabled 设为 true 开启。IntervalDays 默认 3，启动或调整计划后至少运行 3×24 小时，再在首个可用的 StartTime（默认 03:00）到 EndTime（默认 05:00，不含）窗口内随机选一分钟退出重启。Timezone 留空使用服务器时区，可填 Asia/Shanghai。普通配置热重载不重置计划；更改计划、关闭后再开启或进程重启会重新计时。所有节点连接会中断，最多等待 10 秒清理；自动拉起依赖服务管理器的重启策略。",
         "Cores.Type": "Type 可填 xray 或 sing，两者可同时配置；如配置多个同类核心，可增加 Name，并在节点中用 CoreName 指定。",
         "Cores.Log": "xray 核心 Level 可填 debug/info/warning/error/none，ErrorPath 为空时输出到控制台；sing 核心 Level 可填 trace/debug/info/warn/error/fatal/panic，Output 为空时输出到控制台。",
         "Cores.ConnectionConfig": "handshake/connIdle/uplinkOnly/downlinkOnly 单位为秒；bufferSize 单位为 KB。仅 xray 核心使用。",

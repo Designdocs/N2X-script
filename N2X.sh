@@ -38,6 +38,11 @@ if [[ -f "$SCRIPT_DIR/outbound_unlock.sh" ]]; then
 elif [[ -f /usr/local/N2X/outbound_unlock.sh ]]; then
     source /usr/local/N2X/outbound_unlock.sh
 fi
+if [[ -f "$SCRIPT_DIR/geodata.sh" ]]; then
+    source "$SCRIPT_DIR/geodata.sh"
+elif [[ -f /usr/local/N2X/geodata.sh ]]; then
+    source /usr/local/N2X/geodata.sh
+fi
 
 # check root
 [[ $EUID -ne 0 ]] && echo -e "${red}错误: ${plain} 必须使用root用户运行此脚本！\n" && exit 1
@@ -906,13 +911,48 @@ install() {
     fi
 }
 
+update_command() {
+    if [[ "${1:-}" == geodata ]]; then
+        shift
+        if ! declare -F geodata_update >/dev/null; then
+            # Older update_shell implementations fetch the new manager but
+            # do not yet know this module. Bootstrap it on the first update.
+            if ! download_managed_shell_file \
+                https://raw.githubusercontent.com/Designdocs/N2X-script/main/geodata.sh \
+                /usr/local/N2X/geodata.sh \
+                || ! source /usr/local/N2X/geodata.sh \
+                || ! declare -F geodata_update >/dev/null; then
+                echo -e "${red}Geo 更新模块安装失败，请执行 N2X update_shell 后重试。${plain}" >&2
+                return 1
+            fi
+        fi
+        geodata_update "$@"
+        return $?
+    fi
+    local requested_version='' arg
+    for arg in "$@"; do
+        case "$arg" in
+            -r|--restart) ;; # Full installation already restarts the service.
+            -*) echo "用法：N2X update [版本] 或 N2X update geodata [-r]" >&2; return 1 ;;
+            *)
+                [[ -z "$requested_version" ]] || { echo "只能指定一个 N2X 版本。" >&2; return 1; }
+                requested_version="$arg"
+                ;;
+        esac
+    done
+    update 0 "$requested_version"
+}
+
 update() {
+    local version
     if [[ $# == 0 ]]; then
         echo && echo -n -e "输入指定版本(默认最新版): " && read version
     else
         version=$2
     fi
-    bash <(curl -Ls https://raw.githubusercontent.com/Designdocs/N2X-script/main/install.sh) $version
+    local install_args=()
+    [[ -z "$version" ]] || install_args+=("$version")
+    bash <(curl -Ls https://raw.githubusercontent.com/Designdocs/N2X-script/main/install.sh) "${install_args[@]}"
     if [[ $? == 0 ]]; then
         echo -e "${green}更新完成，已自动重启 N2X，请使用 N2X log 查看运行日志${plain}"
         exit
@@ -1176,7 +1216,7 @@ update_shell() {
         # N2X.sh 只是壳，功能实现在这几个被 source 的文件里；只更新壳会让新菜单
         # 调到不存在的函数，所以一起更新。
         local module
-        for module in artx_decoy.sh config_gen.sh config_append.sh download_block.sh outbound_unlock.sh; do
+        for module in artx_decoy.sh config_gen.sh config_append.sh download_block.sh outbound_unlock.sh geodata.sh; do
             if ! download_managed_shell_file \
                 "https://raw.githubusercontent.com/Designdocs/N2X-script/main/${module}" \
                 "/usr/local/N2X/${module}"; then
@@ -1506,6 +1546,7 @@ show_usage() {
     echo "N2X check        - 检查 N2X 配置文件（不启动服务）"
     echo "N2X update       - 更新 N2X"
     echo "N2X update x.x.x - 安装 N2X 指定版本"
+    echo "N2X update geodata [-r] - 更新 Geo 数据；-r 在数据变化后重启运行中的服务"
     echo "N2X install      - 安装 N2X"
     echo "N2X uninstall    - 卸载 N2X"
     echo "N2X version      - 查看 N2X 版本"
@@ -1595,7 +1636,7 @@ if [[ $# > 0 ]]; then
         "decoy") decoy_command "${2:-status}" ;;
         "download"|"dl") download_block_command "${2:-status}" "${3:-all}" ;;
         "unlock") outbound_unlock_command "${2:-list}" ;;
-        "update") check_install 0 && update 0 $2 ;;
+        "update") check_install 0 && update_command "${@:2}" ;;
         "config") config $* ;;
         "generate") generate_config_file ;;
         "addnode"|"add_node"|"append") add_protocol_config 0 ;;
