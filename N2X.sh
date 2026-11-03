@@ -1589,20 +1589,24 @@ show_menu() {
 ————————————————
   ${green}9.${plain} 设置 N2X 开机自启
   ${green}10.${plain} 取消 N2X 开机自启
-————————————————
+———— ${yellow}系统与工具${plain} ————
   ${green}11.${plain} 一键安装 bbr (最新内核)
   ${green}12.${plain} 查看 N2X 版本
   ${green}13.${plain} 生成 X25519 密钥
   ${green}14.${plain} 升级脚本
+———— ${yellow}配置生成${plain} ————
   ${green}15.${plain} 生成 N2X 配置文件（重建，会覆盖已有节点）
   ${green}16.${plain} 增加协议配置（在已有配置上追加节点）
   ${green}17.${plain} 创建/检测 .env 文件
+———— ${yellow}网络管理${plain} ————
   ${green}18.${plain} 放行 VPS 的所有网络端口
   ${green}19.${plain} Caddy 443 分流管理
   ${green}20.${plain} 下载拦截管理（BT/P2P 启停）
   ${green}21.${plain} 出口解锁设置（自定义 http/socks 分流）
+———— ${yellow}检查与清理${plain} ————
   ${green}22.${plain} 检查配置文件（不启动服务）
   ${green}23.${plain} 删除节点（按 NodeID 删除整段配置）
+————————————————
   ${green}24.${plain} 退出脚本
  "
  #后续更新可加入上方字符串中
