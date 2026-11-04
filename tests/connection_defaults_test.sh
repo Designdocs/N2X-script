@@ -25,7 +25,7 @@ if has_program:
     example = json.loads((program_repo / 'example/config.json').read_text())
     example = next(core for core in example['Cores'] if core['Type'] == 'xray')['ConnectionConfig']
     source = (program_repo / 'conf/xray.go').read_text()
-for key, field, expected in [('connIdle', 'ConnIdle', 600),
+for key, field, expected in [('connIdle', 'ConnIdle', 300),
                              ('handshake', 'Handshake', 4),
                              ('uplinkOnly', 'UplinkOnly', 2),
                              ('downlinkOnly', 'DownlinkOnly', 5)]:
