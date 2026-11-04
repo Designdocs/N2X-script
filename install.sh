@@ -658,6 +658,17 @@ install_xray_side_files() {
     return 0
 }
 
+# Preserve custom idle timeouts; migrate the two previous defaults only.
+run_xray_conn_idle_migration() {
+    if declare -F migrate_xray_conn_idle >/dev/null; then
+        if ! migrate_xray_conn_idle; then
+            log_warn "connIdle 自动迁移未完成，原配置保留；请检查上方原因。"
+        fi
+    else
+        log_warn "配置模块缺少 connIdle 迁移功能，请更新管理脚本后重试。"
+    fi
+}
+
 # Only the deprecated freedom field is migrated; failures keep the file intact.
 run_freedom_domain_strategy_migration() {
     if declare -F migrate_freedom_domain_strategy >/dev/null; then
@@ -1473,11 +1484,12 @@ EOF
         log_warn "未能加载最小诱饵 Web 服务安装模块；N2X 主服务仍将继续安装。"
     fi
 
-    # Prepare and migrate existing outbound files before starting the new core.
+    # Migrate existing files while the main service is stopped, before start.
     if ! install_xray_side_files; then
         log_error "xray 配套文件未能全部写入 /etc/N2X/，请修复后执行：N2X generate"
     fi
     run_freedom_domain_strategy_migration
+    run_xray_conn_idle_migration
     run_download_block_migration
 
     if [[ ! -f /etc/N2X/config.json ]]; then

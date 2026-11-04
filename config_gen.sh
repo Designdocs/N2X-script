@@ -471,6 +471,175 @@ write_default_custom_outbound_json() {
 EOF
 }
 
+# Only program upgrades call this migration, after the service has stopped.
+# Ordinary sourcing and update_shell leave the running main config untouched.
+migrate_xray_conn_idle() {
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "connIdle 迁移需要 python3，原文件未改动。" >&2
+        return 1
+    fi
+    python3 - "${1:-${N2X_CONFIG_DIR:-/etc/N2X}/config.json}" <<'PY'
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import sys
+import tempfile
+
+
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("JSON 包含重复键，拒绝改写")
+        result[key] = value
+    return result
+
+
+def reject_constant(value):
+    raise ValueError("JSON 包含无效数字，拒绝改写")
+
+
+def field(obj, name):
+    # Match the Go JSON decoder's case-insensitive field names, but refuse
+    # ambiguous variants rather than guessing which value takes precedence.
+    keys = [key for key in obj if key.lower() == name.lower()]
+    if len(keys) > 1:
+        raise ValueError("%s 包含大小写重复键，拒绝改写" % name)
+    return keys[0] if keys else None
+
+
+def replacement_spans(text):
+    # Mask JSONC comments and trailing commas without moving any character.
+    # Parse the masked document, then edit only selected numeric tokens in the
+    # original text, preserving comments, secrets, whitespace and key order.
+    masked = re.sub(r'"(?:\\.|[^"\\])*"|//[^\r\n]*|/\*.*?\*/',
+                    lambda m: m[0] if m[0].startswith('"') else
+                    ''.join(c if c in '\r\n' else ' ' for c in m[0]), text, flags=re.S)
+    masked = re.sub(r'"(?:\\.|[^"\\])*"|,(\s*[}\]])',
+                    lambda m: ' ' + m[1] if m[1] is not None else m[0], masked)
+    decoder = json.JSONDecoder(object_pairs_hook=unique_object, parse_constant=reject_constant)
+    config = decoder.decode(masked)
+    if not isinstance(config, dict):
+        raise ValueError("主配置必须是对象")
+    cores_key = field(config, "Cores")
+    if cores_key is None:
+        return []
+    cores = config[cores_key]
+    if not isinstance(cores, list) or any(not isinstance(c, dict) for c in cores):
+        raise ValueError("Cores 必须是对象数组")
+    selected = set()
+    for index, core in enumerate(cores):
+        type_key = field(core, "Type")
+        if type_key is None or core[type_key] != "xray":
+            continue
+        connection_key = field(core, "ConnectionConfig")
+        if connection_key is None or core[connection_key] is None:
+            continue
+        connection = core[connection_key]
+        if not isinstance(connection, dict):
+            raise ValueError("Cores[%d].ConnectionConfig 必须是对象" % index)
+        idle_key = field(connection, "connIdle")
+        if idle_key is not None and type(connection[idle_key]) is int and connection[idle_key] in (30, 600):
+            selected.add((cores_key, index, connection_key, idle_key))
+    if not selected:
+        return []
+
+    spans = []
+
+    def space(pos):
+        while pos < len(masked) and masked[pos] in ' \t\r\n':
+            pos += 1
+        return pos
+
+    def walk(pos, path):
+        pos = space(pos)
+        if masked[pos] == '{':
+            pos = space(pos + 1)
+            while masked[pos] != '}':
+                key, pos = decoder.raw_decode(masked, pos)
+                pos = walk(space(pos) + 1, path + (key,))
+                pos = space(pos)
+                if masked[pos] == ',':
+                    pos = space(pos + 1)
+            return pos + 1
+        if masked[pos] == '[':
+            pos, index = space(pos + 1), 0
+            while masked[pos] != ']':
+                pos = space(walk(pos, path + (index,)))
+                index += 1
+                if masked[pos] == ',':
+                    pos = space(pos + 1)
+            return pos + 1
+        _, end = decoder.raw_decode(masked, pos)
+        if path in selected:
+            spans.append((pos, end))
+        return end
+
+    walk(0, ())
+    if len(spans) != len(selected):
+        raise ValueError("无法定位 connIdle 字段，拒绝改写")
+    return spans
+
+
+def migrate(path):
+    # Keep symlinks intact and replace their actual target atomically.
+    path = path.resolve()
+    if not path.exists():
+        return
+    with path.open('rb') as handle:
+        raw = handle.read()
+        original_stat = os.fstat(handle.fileno())
+    text = raw.decode('utf-8')
+    spans = replacement_spans(text)
+    if not spans:
+        return
+    for start, end in sorted(spans, reverse=True):
+        text = text[:start] + '300' + text[end:]
+    payload = text.encode('utf-8')
+    backup = temporary = None
+    backup_complete = False
+    try:
+        for is_backup, data in ((True, raw), (False, payload)):
+            suffix = '.bak.conn-idle.' if is_backup else '.tmp.conn-idle.'
+            fd, name = tempfile.mkstemp(prefix=path.name + suffix, dir=str(path.parent))
+            if is_backup:
+                backup = name
+            else:
+                temporary = name
+            with os.fdopen(fd, 'wb') as handle:
+                current = os.fstat(handle.fileno())
+                if (current.st_uid, current.st_gid) != (original_stat.st_uid, original_stat.st_gid):
+                    os.fchown(handle.fileno(), original_stat.st_uid, original_stat.st_gid)
+                os.fchmod(handle.fileno(), stat.S_IMODE(original_stat.st_mode))
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+            if is_backup:
+                backup_complete = True
+        current = path.stat()
+        attributes = ('st_dev', 'st_ino', 'st_mode', 'st_uid', 'st_gid', 'st_mtime_ns')
+        if path.read_bytes() != raw or any(getattr(current, a) != getattr(original_stat, a) for a in attributes):
+            raise ValueError("文件在迁移期间被修改，拒绝覆盖")
+        os.replace(temporary, path)
+        temporary = None
+    finally:
+        if temporary is not None:
+            os.unlink(temporary)
+        if backup is not None and not backup_complete:
+            os.unlink(backup)
+    print("已将 %s 的 %d 个 Xray connIdle 从 30/600 调整为 300 秒；备份：%s" % (path, len(spans), backup))
+
+
+try:
+    migrate(Path(sys.argv[1]))
+except Exception as error:
+    print("connIdle 迁移失败：%s；原配置保留，请手动检查。" % error, file=sys.stderr)
+    sys.exit(1)
+PY
+}
+
 # Upgrade existing outbound files without regenerating user configuration.
 # Optional arguments select explicit files; otherwise also discover custom xray
 # OutboundConfigPath values in config.json. Ordinary sourcing does not write;

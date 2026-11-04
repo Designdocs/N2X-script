@@ -51,6 +51,19 @@ migrate_freedom_domain_strategy /实际路径/custom_outbound.json
 迁移不会重建节点或覆盖解锁出站。只升级管理脚本后，执行 `N2X check`，通过后执行
 `systemctl restart N2X` 重新加载配置。
 
+## 升级时迁移 connIdle
+
+`N2X update`（包括 `N2X update v0.17.17`）使用最新安装脚本，在主服务停止后、启动
+新版本前检查 `/etc/N2X/config.json`：仅将 xray 核心 `ConnectionConfig.connIdle` 的
+整数值 `30` 或 `600` 改为 `300`。`300`、其他自定义值、未设置的字段、sing 核心和
+节点的其他配置均保持不变。手动替换二进制不执行此迁移；单独 `N2X update_shell`
+也不改主配置，避免触发运行中服务的配置重载。
+
+迁移依赖 python3。修改前自动保存原文件到同目录的
+`config.json.bak.conn-idle.<随机后缀>`；保留原所有者、权限、JSON 注释、尾逗号和格式，
+采用临时文件原子替换。重复升级无变化时不写文件、不新增备份；解析、重复键、并发修改
+或写入失败时保留原配置并显示原因。无需重新生成节点配置。
+
 ## Cloudflare DNS 证书
 
 Cloudflare 的 DNS 证书配置使用 `DNSEnv.CF_DNS_API_TOKEN`。生成的 `ExampleTOKEN` 需要替换为实际 API Token，权限仅授予所需域名的 `Zone / DNS / Edit` 和 `Zone / Zone / Read`，区域资源选择 `Include / Specific zone`。可参考 [Cloudflare 创建说明](https://developers.cloudflare.com/fundamentals/api/get-started/create-token/)和 [lego 配置说明](https://go-acme.github.io/lego/dns/cloudflare/)。指定 Zone 的权限覆盖其中所有 DNS 记录。
