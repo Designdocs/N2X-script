@@ -98,15 +98,18 @@ DDNS 默认关闭。安装、生成配置和追加节点共用同一套引导：
 
 ## Geo 数据更新
 
-`N2X update geodata` 独立下载 `geoip.dat` 和 `geosite.dat` 到 `/etc/N2X/`，不更新程序。数据源使用发行包同源的 [Loyalsoldier/v2ray-rules-dat](https://github.com/Loyalsoldier/v2ray-rules-dat)，四份下载（两份数据和各自 SHA-256 校验）固定到同一提交。全部下载并校验后才替换；失败保留原数据，文件替换或服务重启命令失败会恢复备份。
+- **上海时间每周日 03:00** 检查一次上游提交，有新版本才下载 `geoip.dat`、`geosite.dat` 和各自的 SHA-256 校验文件。四份文件来自 [Loyalsoldier/v2ray-rules-dat](https://github.com/Loyalsoldier/v2ray-rules-dat) 的同一提交。全部校验通过才替换；检查和替换期间 N2X 继续运行。
+- **同日 03:30**，只有文件内容已变化、仍由原进程提供服务时，才重启 N2X，让 Xray 载入新规则。已重启过或已停止的服务会跳过。错过维护时段会等下周。
 
-安装脚本保留每周六服务器时间 04:00 的计划：
+安装和 `N2X update_shell` 会移除 root crontab 里的旧 Geo 和程序月更任务，再安装新计划。能同步更新配置模块的旧管理脚本也会在首次升级时自动迁移，迁移过程不重启 N2X。手工替换脚本或迁移失败时，可用 `N2X maintenance schedule` 补做，`N2X geodata schedule` 是它的别名。systemd 可用 `systemctl list-timers N2X-geodata.timer` 查看计划，`journalctl -u N2X-geodata.service` 查看日志。Alpine 通过 crontab 调度，日志在 `/var/log/N2X-geodata.log`。Alpine 和不支持定时器时区的旧版 systemd 先检查时钟，只有上海维护时段才连接上游。
 
-```cron
-0 4 * * 6 /usr/bin/N2X update geodata -r >/var/log/N2X-geodata.log 2>&1
-```
+`N2X update geodata` 可手动下载并替换文件，规则在下次启动时生效。兼容的 `-r` / `--restart` 只把有变化的数据登记到 03:30 的维护计划。程序安装/升级仍只补充缺失或空的 Geo 文件。自定义 Xray `AssetPath` 时设置 `N2X_GEODATA_DIR`，systemd 定时任务可在 `/etc/N2X/geodata.env` 中设置该变量；Alpine 可在 root crontab 中设置。可用 `N2X_GEODATA_REVISION` 的 40 位提交 SHA 固定版本。默认目录是 `/etc/N2X`，目录中的 `geodata.revision.txt` 记录已安装版本。
 
-`-r` / `--restart` 仅在数据变化时重启已运行的 N2X。文件相同不重启，停止的服务不会启动；不带参数只下载，下次启动或重启时生效。`N2X update_shell` 会一并更新 `geodata.sh` 模块，修复已有 cron，无需升级二进制；旧脚本升级后漏装模块时，首次 Geo 更新会自动补装。程序安装/升级只补充缺失或空文件，保留已有独立更新和自定义数据。自定义 `AssetPath` 时设置 `N2X_GEODATA_DIR`；可用 `N2X_GEODATA_REVISION` 的 40 位提交 SHA 固定版本。目标目录的 `geodata.revision.txt` 记录数据来源。
+## 程序自动升级
+
+上海时间每月 **1 日 03:30** 检查 N2X 稳定版。只有版本较新、N2X 正在运行，且新程序通过现有配置校验，才会在 **04:00 前** 开始切换。检查、下载和预检期间继续使用旧进程；同版、旧版、已停止的服务或错过时段均跳过。月更如果正好遇上周日，会先升级程序，让新进程一并载入已经下载的 Geo 数据。
+
+旧 cron 命令 `N2X update -r` 也受月更窗口限制。显式运行 `N2X update [版本]`、保存配置、增删节点和修改分流，仍立即生效；手动重启和故障恢复继续即时处理。
 
 ## 检查配置文件
 

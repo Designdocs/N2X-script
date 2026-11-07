@@ -163,16 +163,41 @@ class MigrationTests(unittest.TestCase):
             start = body.index("        if declare -F migrate_freedom_domain_strategy")
             end = body.index("        fi\n", start) + len("        fi\n")
             body = body[:start] + body[end:]
+            start = body.index("        if ! source /usr/local/N2X/geodata.sh")
+            end = body.index("        fi\n", start) + len("        fi\n")
+            body = body[:start] + body[end:]
+            body = body.replace("        local update_shell_handles_maintenance=1\n", "")
         body = body.replace("/usr/local/N2X", str(self.root / "installed"))
         body = body.replace("/usr/bin/N2X", str(self.root / "manager"))
         (self.root / "installed").mkdir()
         prelude = '''
 red= green= yellow= plain=
-download_managed_shell_file() { cp "$TEST_REPO/${1##*/}" "$2"; }
+download_managed_shell_file() {
+    case "${1##*/}" in
+        N2X.sh)
+            printf '%s\\n' '#!/bin/bash' '[[ "$*" == "maintenance schedule" ]] || exit 1' \
+                'echo legacy >> "$MAINTENANCE_TEST_LOG"' > "$2"
+            ;;
+        config_gen.sh)
+            sed 's|/usr/bin/N2X maintenance schedule|"$MAINTENANCE_TEST_MANAGER" maintenance schedule|' \
+                "$TEST_REPO/config_gen.sh" > "$2"
+            ;;
+        geodata.sh)
+            printf '%s\\n' 'maintenance_apply() { :; }' \
+                'geodata_schedule_install() { echo new >> "$MAINTENANCE_TEST_LOG"; }' > "$2"
+            ;;
+        *) cp "$TEST_REPO/${1##*/}" "$2" ;;
+    esac
+}
 '''
+        maintenance_log = self.root / "maintenance.log"
         result = subprocess.run(["bash", "-c", prelude + "\nupdate_shell() {\n" + body + "\n}\nupdate_shell\n"],
-                                env=dict(self.env, TEST_REPO=str(REPO)), capture_output=True, text=True)
+                                env=dict(self.env, TEST_REPO=str(REPO),
+                                         MAINTENANCE_TEST_MANAGER=str(self.root / "manager"),
+                                         MAINTENANCE_TEST_LOG=str(maintenance_log)),
+                                capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(maintenance_log.read_text(), "legacy\n" if legacy else "new\n")
         if conflict:
             self.assertEqual(self.path.read_bytes(), raw)
             self.assertEqual(self.backups(), [])

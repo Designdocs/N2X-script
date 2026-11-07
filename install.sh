@@ -943,15 +943,6 @@ verify_dependencies() {
     require_cmd envsubst
 }
 
-ensure_cron_job() {
-    local spec="$1" cmd="$2"
-    local tmp
-    tmp="$(crontab -l 2>/dev/null || true)"
-    if ! printf "%s\n" "$tmp" | grep -Fq "$cmd"; then
-        printf "%s\n%s %s\n" "$tmp" "$spec" "$cmd" | crontab -
-    fi
-}
-
 # 0: running, 1: not running, 2: not installed
 check_status() {
     if [[ ! -f /usr/local/N2X/N2X ]]; then
@@ -1302,9 +1293,50 @@ install_geodata_files() {
     return 0
 }
 
+scheduled_release_is_newer() {
+    local latest="${1#v}" current="${2#v}"
+    [[ "$latest" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$current" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 2
+    awk -v latest="$latest" -v current="$current" 'BEGIN {
+        split(latest, a, "."); split(current, b, ".");
+        for (i = 1; i <= 3; i++) {
+            if (a[i]+0 > b[i]+0) exit 0;
+            if (a[i]+0 < b[i]+0) exit 1;
+        }
+        exit 1;
+    }'
+}
+
+download_scheduled_release() {
+    local url="$1" archive="$2" expected actual
+    geodata_download "$url" "$archive" \
+        && geodata_download "$url.dgst" "$archive.dgst" || return 1
+    expected="$(awk '/^SHA(2-)?256[[:space:]]*=/ {
+        sub(/^[^=]*=[[:space:]]*/, "")
+        sub(/[[:space:]]+$/, "")
+        print tolower($0)
+        exit
+    }' "$archive.dgst")"
+    actual="$(geodata_sha256 "$archive")" || return 1
+    [[ "$expected" =~ ^[0-9a-f]{64}$ && "$expected" == "$actual" ]]
+}
+
+stage_scheduled_support() {
+    local directory="$1" module
+    local base=https://raw.githubusercontent.com/Designdocs/N2X-script/main
+    mkdir -p "$directory" || return 1
+    for module in N2X.sh config_gen.sh config_append.sh render_config.sh run.sh artx_decoy.sh \
+        download_block.sh outbound_unlock.sh geodata.sh; do
+        curl --proto '=https' --proto-redir '=https' -fsSL --connect-timeout 10 --max-time 30 \
+            -o "$directory/$module" "$base/$module" \
+            && [[ -s "$directory/$module" ]] \
+            && bash -n "$directory/$module" || return 1
+    done
+}
+
 install_N2X() {
     local staging_root=""
     local extracted_dir=""
+    local installed_version code SCRIPT_DIR="$SCRIPT_DIR"
 
     staging_root="$(mktemp -d /tmp/n2x-install.XXXXXX)" || die "创建临时目录失败"
     extracted_dir="${staging_root}/N2X"
@@ -1312,20 +1344,41 @@ install_N2X() {
     cd "$staging_root" || die "切换到临时目录失败"
 
     if  [ $# == 0 ] ;then
-        last_version=$(curl -Ls "https://api.github.com/repos/Designdocs/N2X/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+        last_version=$(curl -fsSL --connect-timeout 10 --max-time 30 "https://api.github.com/repos/Designdocs/N2X/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
         if [[ ! -n "$last_version" ]]; then
             rm -rf "$staging_root" >/dev/null 2>&1 || true
             die "检测 N2X 版本失败，可能是超出 Github API 限制，请稍后再试，或手动指定 N2X 版本安装"
+        fi
+        if [[ -n "${scheduled_day:-}" ]]; then
+            installed_version="$("${N2X_BIN:-/usr/local/N2X/N2X}" version | awk '$1 == "N2X" { print $2; exit }')"
+            code=0
+            scheduled_release_is_newer "$last_version" "$installed_version" || code=$?
+            if [[ "$code" != 0 ]]; then
+                rm -rf "$staging_root"
+                if [[ "$code" == 2 ]]; then
+                    log_warn "无法比较已安装版本和最新稳定版，跳过自动升级。"
+                else
+                    log_info "没有比当前版本更新的稳定版，跳过自动升级。"
+                fi
+                return 0
+            fi
         fi
         log_info "检测到 N2X 最新版本：${last_version}，开始安装"
         asset_suffix=$(pick_asset_suffix "$last_version") || die "当前架构无可用安装包，请检查发行页面：$last_version"
         log_info "选择下载包: ${asset_suffix}"
         url="https://github.com/Designdocs/N2X/releases/download/${last_version}/N2X-${asset_suffix}.zip"
-        download_file "$url" "${staging_root}/N2X-linux.zip" || {
-            rm -rf "$staging_root" >/dev/null 2>&1 || true
-            die "下载 N2X 失败：$url"
-        }
-        verify_sha256_if_possible "$url" "${staging_root}/N2X-linux.zip"
+        if [[ -n "${scheduled_day:-}" ]]; then
+            download_scheduled_release "$url" "${staging_root}/N2X-linux.zip" || {
+                rm -rf "$staging_root"
+                die "自动升级包下载或 SHA-256 校验失败，已保留当前运行版本。"
+            }
+        else
+            download_file "$url" "${staging_root}/N2X-linux.zip" || {
+                rm -rf "$staging_root" >/dev/null 2>&1 || true
+                die "下载 N2X 失败：$url"
+            }
+            verify_sha256_if_possible "$url" "${staging_root}/N2X-linux.zip"
+        fi
     else
         last_version=$1
         asset_suffix=$(pick_asset_suffix "$last_version") || die "当前架构无可用安装包，请检查发行页面：$last_version"
@@ -1349,6 +1402,24 @@ install_N2X() {
         die "安装包中未找到可执行文件 N2X"
     }
 
+    if [[ -n "${scheduled_day:-}" ]]; then
+        if ! "$extracted_dir/N2X" check -c /etc/N2X/config.json; then
+            rm -rf "$staging_root"
+            die "新版本未通过现有配置校验，已保留当前运行版本。"
+        fi
+        if ! stage_scheduled_support "$staging_root/support"; then
+            rm -rf "$staging_root"
+            die "管理脚本未下载完成，已保留当前运行版本。"
+        fi
+        SCRIPT_DIR="$staging_root/support"
+        # Download/validation can run late. Recheck immediately before stop.
+        if ! maintenance_apply_window "$scheduled_day" || ! geodata_service_instance >/dev/null; then
+            rm -rf "$staging_root"
+            log_info "维护时段已结束或 N2X 已停止，跳过自动升级。"
+            return 0
+        fi
+    fi
+
     if [[ x"${release}" == x"alpine" ]]; then
         service N2X stop >/dev/null 2>&1 || true
     else
@@ -1359,12 +1430,12 @@ install_N2X() {
         rm -rf "$staging_root" >/dev/null 2>&1 || true
         die "替换 /usr/local/N2X 失败，已保留旧版本"
     }
-    rm -rf "$staging_root" >/dev/null 2>&1 || true
-
     if ! install_support_scripts; then
+        rm -rf "$staging_root" >/dev/null 2>&1 || true
         restore_installation_backup >/dev/null 2>&1 || true
         die "安装管理脚本失败，请检查本地脚本目录或网络连接"
     fi
+    rm -rf "$staging_root" >/dev/null 2>&1 || true
     cleanup_installation_backup
 
     cd /usr/local/N2X/ || die "切换到安装目录失败"
@@ -1522,15 +1593,16 @@ EOF
         first_install=false
     fi
 
-    # Independent geodata sync (Sat 04:00, restart only on change), monthly program update.
-    ensure_cron_job "0 4 * * 6" "/usr/bin/N2X update geodata -r >/var/log/N2X-geodata.log 2>&1"
-    ensure_cron_job "30 4 1 * *" "/usr/bin/N2X update -r >/var/log/N2X-update.log 2>&1"
+    if ! source /usr/local/N2X/geodata.sh || ! declare -F maintenance_apply >/dev/null \
+        || ! geodata_schedule_install; then
+        log_warn "维护计划安装失败，请执行 N2X maintenance schedule 重试。"
+    fi
     if [ ! -L /usr/bin/n2x ]; then
         ln -s /usr/bin/N2X /usr/bin/n2x
         chmod +x /usr/bin/n2x
     fi
     cd $cur_dir
-    rm -f install.sh
+    [[ -n "${scheduled_day:-}" ]] || rm -f install.sh
     echo -e ""
     echo "N2X 管理脚本使用方法 (兼容使用N2X执行，大小写不敏感): "
     echo "------------------------------------------"
@@ -1571,6 +1643,17 @@ EOF
 }
 
 echo -e "${green}开始安装${plain}"
-install_base
+scheduled_day=''
+if [[ "${1:-}" == --scheduled ]]; then
+    shift
+    [[ $# == 0 ]] || die "定时升级只检查最新稳定版。"
+    if ! source /usr/local/N2X/geodata.sh || ! declare -F maintenance_apply_slot >/dev/null; then
+        die "缺少新版维护模块，跳过定时升级。"
+    fi
+    scheduled_day="$(maintenance_apply_slot)" || exit 0
+    [[ "$scheduled_day" == *-01 ]] || exit 0
+else
+    install_base
+fi
 verify_dependencies
-install_N2X $1
+install_N2X "$@"

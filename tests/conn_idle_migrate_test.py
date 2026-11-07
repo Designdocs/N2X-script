@@ -224,7 +224,16 @@ tempfile.mkstemp = edit_during_write
         body = body.replace("/usr/local/N2X", str(self.root / "installed"))
         body = body.replace("/usr/bin/N2X", str(self.root / "manager"))
         (self.root / "installed").mkdir()
-        prelude = 'red= green= yellow= plain=\ndownload_managed_shell_file() { cp "$1" "$2"; }\n'
+        prelude = '''
+red= green= yellow= plain=
+download_managed_shell_file() {
+    if [[ "${1##*/}" == geodata.sh ]]; then
+        printf '%s\\n' 'maintenance_apply() { :; }' 'geodata_schedule_install() { :; }' > "$2"
+    else
+        cp "$1" "$2"
+    fi
+}
+'''
         body = body.replace("https://raw.githubusercontent.com/Designdocs/N2X-script/main", str(REPO))
         self.shell(prelude + "\nupdate_shell() {\n" + body + "\n}\nupdate_shell\n")
         self.assert_untouched(raw, before)

@@ -911,28 +911,50 @@ install() {
     fi
 }
 
+ensure_geodata_module() {
+    # An older module still restarts immediately with -r. Never call it,
+    # even if only the manager has been upgraded so far.
+    if declare -F maintenance_apply >/dev/null; then
+        return 0
+    fi
+    if ! download_managed_shell_file \
+        https://raw.githubusercontent.com/Designdocs/N2X-script/main/geodata.sh \
+        /usr/local/N2X/geodata.sh \
+        || ! source /usr/local/N2X/geodata.sh \
+        || ! declare -F maintenance_apply >/dev/null; then
+        echo -e "${red}Geo 更新模块安装失败，请执行 N2X update_shell 后重试。${plain}" >&2
+        return 1
+    fi
+}
+
+geodata_command() {
+    case "${1:-}" in
+        schedule)
+            ensure_geodata_module && geodata_schedule_install
+            ;;
+        weekly)
+            # Timer entry point. Never bootstrap or download outside the window.
+            if ! declare -F maintenance_apply >/dev/null; then
+                echo "Geo 定时模块未安装，请执行 N2X update_shell。" >&2
+                return 1
+            fi
+            geodata_weekly
+            ;;
+        *) echo "用法：N2X maintenance schedule" >&2; return 1 ;;
+    esac
+}
+
 update_command() {
     if [[ "${1:-}" == geodata ]]; then
         shift
-        if ! declare -F geodata_update >/dev/null; then
-            # Older update_shell implementations fetch the new manager but
-            # do not yet know this module. Bootstrap it on the first update.
-            if ! download_managed_shell_file \
-                https://raw.githubusercontent.com/Designdocs/N2X-script/main/geodata.sh \
-                /usr/local/N2X/geodata.sh \
-                || ! source /usr/local/N2X/geodata.sh \
-                || ! declare -F geodata_update >/dev/null; then
-                echo -e "${red}Geo 更新模块安装失败，请执行 N2X update_shell 后重试。${plain}" >&2
-                return 1
-            fi
-        fi
+        ensure_geodata_module || return 1
         geodata_update "$@"
         return $?
     fi
-    local requested_version='' arg
+    local requested_version='' arg legacy_auto=0
     for arg in "$@"; do
         case "$arg" in
-            -r|--restart) ;; # Full installation already restarts the service.
+            -r|--restart) legacy_auto=1 ;;
             -*) echo "用法：N2X update [版本] 或 N2X update geodata [-r]" >&2; return 1 ;;
             *)
                 [[ -z "$requested_version" ]] || { echo "只能指定一个 N2X 版本。" >&2; return 1; }
@@ -940,6 +962,10 @@ update_command() {
                 ;;
         esac
     done
+    if [[ "$legacy_auto" == 1 && -z "$requested_version" ]]; then
+        ensure_geodata_module && maintenance_apply monthly
+        return
+    fi
     update 0 "$requested_version"
 }
 
@@ -1017,6 +1043,9 @@ uninstall() {
             show_menu
         fi
         return 0
+    fi
+    if declare -F geodata_schedule_remove >/dev/null; then
+        geodata_schedule_remove || echo -e "${yellow}维护计划清理失败，请检查定时器和 crontab。${plain}"
     fi
     if [[ x"${release}" == x"alpine" ]]; then
         if declare -F artx_decoy_uninstall >/dev/null 2>&1; then
@@ -1227,8 +1256,14 @@ update_shell() {
         done
         # 刚下下来的是新版模块，当前进程里还是启动时 source 的旧版；重新 source 一次
         # 才能拿到 download_block_migrate，给老 route.json 里的 BT 规则补上 ruleTag。
+        local update_shell_handles_maintenance=1
         source /usr/local/N2X/config_gen.sh 2>/dev/null || true
         source /usr/local/N2X/download_block.sh 2>/dev/null || true
+        if ! source /usr/local/N2X/geodata.sh || ! declare -F maintenance_apply >/dev/null \
+            || ! geodata_schedule_install; then
+            echo -e "${yellow}管理脚本已更新，但维护计划迁移失败；请执行 N2X maintenance schedule 重试。${plain}"
+            return 1
+        fi
         if declare -F migrate_freedom_domain_strategy >/dev/null; then
             migrate_freedom_domain_strategy || echo -e "${yellow}部分 freedom 配置未能迁移，请查看上方原因；失败文件保留原内容。${plain}"
         fi
@@ -1562,7 +1597,8 @@ show_usage() {
     echo "N2X check        - 检查 N2X 配置文件（不启动服务）"
     echo "N2X update       - 更新 N2X"
     echo "N2X update x.x.x - 安装 N2X 指定版本"
-    echo "N2X update geodata [-r] - 更新 Geo 数据；-r 在数据变化后重启运行中的服务"
+    echo "N2X update geodata [-r] - 下载并替换 Geo 数据；-r 登记到上海时间周日 03:30 生效"
+    echo "N2X maintenance schedule - 迁移旧任务，启用上海凌晨维护计划"
     echo "N2X install      - 安装 N2X"
     echo "N2X uninstall    - 卸载 N2X"
     echo "N2X version      - 查看 N2X 版本"
@@ -1659,6 +1695,7 @@ if [[ $# > 0 ]]; then
         "download"|"dl") download_block_command "${2:-status}" "${3:-all}" ;;
         "unlock") outbound_unlock_command "${2:-list}" ;;
         "update") check_install 0 && update_command "${@:2}" ;;
+        "geodata"|"maintenance") geodata_command "${2:-}" ;;
         "config") config $* ;;
         "generate") generate_config_file ;;
         "addnode"|"add_node"|"append") add_protocol_config 0 ;;

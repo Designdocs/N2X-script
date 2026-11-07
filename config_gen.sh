@@ -377,7 +377,7 @@ build_cores_config() {
 config_help_block() {
     cat <<'EOF'
         "Log": "Level 可填 debug/info/warn/error；Output 留空输出到控制台，否则填写日志文件绝对路径。",
-        "ScheduledRestart": "需支持此字段的新版二进制；默认关闭，手动添加此配置段并将 Enabled 设为 true 开启。IntervalDays 默认 3，启动或调整计划后至少运行 3×24 小时，再在首个可用的 StartTime（默认 03:00）到 EndTime（默认 05:00，不含）窗口内随机选一分钟退出重启。Timezone 留空使用服务器时区，可填 Asia/Shanghai。普通配置热重载不重置计划；更改计划、关闭后再开启或进程重启会重新计时。所有节点连接会中断，最多等待 10 秒清理；自动拉起依赖服务管理器的重启策略。",
+        "ScheduledRestart": "此字段需二进制支持，默认关闭。可手动添加配置段并设 Enabled 为 true。IntervalDays 默认 3，至少运行 3×24 小时后在指定窗口内随机选择一分钟退出重启。要在上海凌晨执行，请显式设置 Timezone 为 Asia/Shanghai、StartTime 为 03:00、EndTime 为 05:00。普通配置热重载不重置计划；更改计划、关闭后再开启或进程重启会重新计时。所有节点连接会中断，最多等待 10 秒清理；自动拉起依赖服务管理器的重启策略。",
         "Cores.Type": "Type 可填 xray 或 sing，两者可同时配置；如配置多个同类核心，可增加 Name，并在节点中用 CoreName 指定。",
         "Cores.Log": "xray 核心 Level 可填 debug/info/warning/error/none，ErrorPath 为空时输出到控制台；sing 核心 Level 可填 trace/debug/info/warn/error/fatal/panic，Output 为空时输出到控制台。",
         "Cores.ConnectionConfig": "handshake/connIdle/uplinkOnly/downlinkOnly 单位为秒；bufferSize 单位为 KB。仅 xray 核心使用。connIdle 默认 300 秒（5 分钟），按业务数据空闲计时，不是连接总时长；持续传输会刷新计时。uplinkOnly/downlinkOnly 仅在一侧结束后生效；已显式配置的值优先。",
@@ -900,4 +900,9 @@ EOF
 if [[ "${FUNCNAME[1]:-}" == "update_shell" ]]; then
     # Old updaters source this file with stderr redirected to /dev/null.
     migrate_freedom_domain_strategy 2>&1 || echo "部分 freedom 配置未能迁移，请查看上方原因；失败文件保留原内容。"
+    # The released updater has already replaced the manager on disk, but its
+    # in-memory function cannot yet migrate the schedule itself.
+    if [[ "${update_shell_handles_maintenance:-}" != 1 ]] && ! /usr/bin/N2X maintenance schedule 2>&1; then
+        echo "维护计划迁移失败，请执行 N2X maintenance schedule 重试。"
+    fi
 fi
