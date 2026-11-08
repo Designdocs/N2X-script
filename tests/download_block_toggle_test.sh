@@ -11,8 +11,7 @@ fail() {
     exit 1
 }
 
-# download_block.sh 只负责改 route.json，不碰 systemd；重启由菜单层做。所以这里
-# 可以直接 source 出来跑，断言落在真实写出的 JSON 上。
+# download_block.sh 保存 route.json，由 N2X 监听并应用。
 # shellcheck source=/dev/null
 source "${repo_dir}/config_gen.sh"
 # shellcheck source=/dev/null
@@ -239,6 +238,14 @@ fi
 [[ "$(cat "$route")" == '{ this is not json' ]] || fail "解析失败时不得改写原文件"
 expect_state traffic unknown
 expect_state domain unknown
+
+# 用户从菜单切换时保存路由并提示热重载。
+write_default_route_json "$route"
+restart() { echo restart >> "$work_dir/restarts"; }
+download_block_set off domain > "$work_dir/toggle-log"
+expect_state domain off
+grep -q '热重载' "$work_dir/toggle-log" || fail "切换成功后应提示热重载"
+[[ ! -e "$work_dir/restarts" ]] || fail "切换下载拦截不得重启服务"
 
 # --- 12. 接线：菜单、子命令、安装与升级都要带上新模块 -----------------------
 python3 - "$repo_dir" <<'WIRING' || fail "N2X.sh / install.sh 未正确接入 download_block.sh"

@@ -1019,28 +1019,52 @@ ensure_vim_editor() {
     return 1
 }
 
+config_apply_saved() (
+    local source="$1" binary="${N2X_BIN:-/usr/local/N2X/N2X}"
+    local runtime="${N2X_RUNTIME_CONFIG:-/run/N2X/config.json}" renderer candidate
+
+    if ! check_status; then
+        echo -e "${yellow}配置已保存，N2X 下次启动时会读取。${plain}"
+        return 0
+    fi
+
+    if [[ "$release" == "alpine" ]]; then
+        # OpenRC 直接使用源配置，保存后由 N2X 监听并校验。
+        "$binary" check -c "$source" || return 1
+    else
+        # systemd 监听渲染后的配置。先在同目录生成候选文件，校验后再替换。
+        if [[ ! -f "$runtime" ]]; then
+            echo -e "${red}配置已保存，但未找到运行配置 ${runtime}。${plain}" >&2
+            return 1
+        fi
+        renderer="$SCRIPT_DIR/render_config.sh"
+        [[ -f "$renderer" ]] || renderer="/usr/local/N2X/render_config.sh"
+        candidate="$(mktemp "${runtime}.XXXXXX")" || return 1
+        trap 'rm -f -- "$candidate"' EXIT
+        CONFIG_PATH="$source" ENV_PATH="$(dirname "$source")/.env" OUTPUT_PATH="$candidate" \
+            /bin/sh "$renderer" || return 1
+        if cmp -s "$candidate" "$runtime"; then
+            echo -e "${yellow}运行配置没有变化。${plain}"
+            return 0
+        fi
+        if ! "$binary" check -c "$candidate"; then
+            echo -e "${red}配置检查失败，当前运行配置仍在使用。${plain}" >&2
+            return 1
+        fi
+        mv -f -- "$candidate" "$runtime" || return 1
+    fi
+    echo -e "${green}配置已保存，等待 N2X 热重载。请使用 N2X log 查看结果。${plain}"
+)
+
 config() {
-    echo "N2X在修改配置后会自动尝试重启"
+    local source="${N2X_CONFIG_DIR:-/etc/N2X}/config.json" result=0
     ensure_vim_editor || return 1
-    vim /etc/N2X/config.json
-    sleep 2
-    restart
-    check_status
-    case $? in
-        0)
-            echo -e "N2X状态: ${green}已运行${plain}"
-            ;;
-        1)
-            echo -e "检测到您未启动N2X或N2X自动重启失败，是否查看日志？[Y/n]" && echo
-            read -e -rp "(默认: y):" yn
-            [[ -z ${yn} ]] && yn="y"
-            if [[ ${yn} == [Yy] ]]; then
-               show_log
-            fi
-            ;;
-        2)
-            echo -e "N2X状态: ${red}未安装${plain}"
-    esac
+    vim "$source" || return 1
+    config_apply_saved "$source" || result=$?
+    if [[ $# == 0 ]]; then
+        before_show_menu
+    fi
+    return "$result"
 }
 
 uninstall() {
@@ -1699,7 +1723,7 @@ if [[ $# > 0 ]]; then
         "unlock") outbound_unlock_command "${2:-list}" ;;
         "update") check_install 0 && update_command "${@:2}" ;;
         "geodata"|"maintenance") geodata_command "${2:-}" ;;
-        "config") config $* ;;
+        "config") config 0 ;;
         "generate") generate_config_file ;;
         "addnode"|"add_node"|"append") add_protocol_config 0 ;;
         "delnode"|"delete_node") delete_node_config 0 ;;

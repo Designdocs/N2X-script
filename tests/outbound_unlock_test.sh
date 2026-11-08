@@ -471,7 +471,7 @@ cp "$outbound" "$work_dir/outbound-before"
 cp "$route" "$work_dir/route-before"
 
 show_menu() { :; }
-outbound_unlock_restart_hint() { echo restart >> "$work_dir/restarts"; }
+restart() { echo restart >> "$work_dir/restarts"; }
 outbound_unlock_menu > "$work_dir/append-log" <<'INPUT'
 2
 99
@@ -485,6 +485,7 @@ geosite:openai aiip.si ippure.com aiip.si
 INPUT
 grep -q '请输入正确的出站编号' "$work_dir/append-log" || fail "未提示无效编号"
 grep -q '已向 sk5-unlock 增加 3 条代理规则' "$work_dir/append-log" || fail "菜单未正确追加规则"
+grep -q '热重载' "$work_dir/append-log" || fail "保存后应提示热重载"
 cmp -s "$outbound" "$work_dir/outbound-before" || fail "追加规则不该改写出站文件"
 python3 - "$route" "$work_dir/route-before" <<'PY' || fail "追加规则改动了目标以外的内容"
 import json, sys
@@ -495,10 +496,13 @@ assert after == before
 PY
 
 cp "$route" "$work_dir/route-after"
-printf '2\naiip.si ippure.com\n\n\n' | outbound_unlock_append_rules_interactive >/dev/null
-printf '2\nnet.coffee\n\nn\n' | outbound_unlock_append_rules_interactive >/dev/null
+printf '2\naiip.si ippure.com\n\n\n' | outbound_unlock_append_rules_interactive > "$work_dir/no-change-log"
+printf '2\nnet.coffee\n\nn\n' | outbound_unlock_append_rules_interactive >> "$work_dir/no-change-log"
 cmp -s "$route" "$work_dir/route-after" || fail "重复录入或取消不该改写路由"
-[[ "$(cat "$work_dir/restarts")" == "restart" ]] || fail "只有实际追加时才应重启"
+if grep -q '热重载' "$work_dir/no-change-log"; then
+    fail "重复录入或取消不该提示热重载"
+fi
+[[ ! -e "$work_dir/restarts" ]] || fail "追加规则不得重启服务"
 
 # 手改配置可用 domains 别名和逗号分隔的字符串；两个键都在时 Xray 使用 domains。
 python3 - "$route" <<'PY'

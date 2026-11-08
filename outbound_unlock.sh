@@ -744,13 +744,8 @@ outbound_unlock_clear() {
 
 # ---- 交互层 ---------------------------------------------------------------
 
-outbound_unlock_restart_hint() {
-    if declare -F restart >/dev/null && [[ -f /usr/local/N2X/N2X ]]; then
-        echo -e "${yellow}正在重启 N2X 以使改动生效...${plain}"
-        restart 0
-    else
-        echo -e "${yellow}请手动重启 N2X 使改动生效。${plain}"
-    fi
+outbound_unlock_reload_hint() {
+    echo -e "${yellow}配置已保存，支持热重载的 N2X 会读取配置。请使用 N2X log 查看结果。${plain}"
 }
 
 # 反复问同一个问题直到校验通过；输入 q 放弃整条。返回 1 表示用户放弃。
@@ -919,7 +914,7 @@ outbound_unlock_add_from_url() {
     if outbound_unlock_add "$tag" "$proto" "$addr" "$port" "$user" "$pass" \
             "$tls" "" 0 "${OUTBOUND_UNLOCK_DOMAINS[@]}"; then
         echo -e "${green}已添加：${tag}${plain}"
-        outbound_unlock_restart_hint
+        outbound_unlock_reload_hint
         return 0
     fi
     echo -e "${red}添加失败，两个配置文件都未改动。${plain}"
@@ -952,7 +947,7 @@ outbound_unlock_add_from_json() {
     fi
     if outbound_unlock_add_raw "$tag" "$raw" "${OUTBOUND_UNLOCK_DOMAINS[@]}"; then
         echo -e "${green}已添加：${tag}${plain}"
-        outbound_unlock_restart_hint
+        outbound_unlock_reload_hint
         return 0
     fi
     echo -e "${red}添加失败，两个配置文件都未改动。${plain}"
@@ -1030,7 +1025,7 @@ outbound_unlock_add_by_fields() {
             "$password" "$use_tls" "$server_name" "$allow_insecure" \
             "${OUTBOUND_UNLOCK_DOMAINS[@]}"; then
         echo -e "${green}已添加：${tag}${plain}"
-        outbound_unlock_restart_hint
+        outbound_unlock_reload_hint
         return 0
     fi
     echo -e "${red}添加失败，两个配置文件都未改动。${plain}"
@@ -1114,7 +1109,7 @@ outbound_unlock_append_rules_interactive() {
         return 0
     fi
     echo -e "${green}已向 ${tag} 增加 ${added} 条代理规则。${plain}"
-    outbound_unlock_restart_hint
+    outbound_unlock_reload_hint
 }
 
 outbound_unlock_clear_interactive() {
@@ -1134,7 +1129,7 @@ outbound_unlock_clear_interactive() {
     fi
     if outbound_unlock_clear; then
         echo -e "${green}已恢复默认配置，备份保留在 $(outbound_unlock_config_dir)。${plain}"
-        outbound_unlock_restart_hint
+        outbound_unlock_reload_hint
     else
         echo -e "${red}清除失败。${plain}"
         return 1

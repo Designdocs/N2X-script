@@ -325,7 +325,7 @@ download_block_state_label() {
 }
 
 # download_block_apply <on|off> [traffic|domain|all]
-# 只改 route.json，不碰服务；重启由菜单层负责，测试才能直接调这个函数。
+# 只改 route.json，应用交给 N2X 的文件监听。
 # 返回 0 = 已改写或本就是目标状态，非 0 = 失败。
 download_block_apply() {
     local want="$1" group="${2:-all}" tags route stash tmp_dir defaults status
@@ -416,7 +416,7 @@ download_block_migrate() {
     esac
 }
 
-# 菜单层：改配置 + 重启服务。restart 由 N2X.sh 提供。
+# 菜单层：保存规则并提示查看热重载结果。
 download_block_set() {
     local want="$1" group="${2:-all}" before label
     label="$(download_block_group_label "$group")"
@@ -434,7 +434,7 @@ download_block_set() {
     fi
 
     if [[ "$before" == "$want" ]]; then
-        echo -e "${yellow}${label}本就处于该状态，未做改动，无需重启。${plain}"
+        echo -e "${yellow}${label}本就处于该状态。${plain}"
         return 0
     fi
 
@@ -445,12 +445,7 @@ download_block_set() {
         echo -e "${yellow}被摘下的规则已存到 $(download_block_stash_path)，重新开启时会原样放回。${plain}"
     fi
 
-    if declare -F restart >/dev/null && [[ -f /usr/local/N2X/N2X ]]; then
-        echo -e "${yellow}正在重启 N2X 以使路由改动生效...${plain}"
-        restart 0
-    else
-        echo -e "${yellow}请手动重启 N2X 使改动生效。${plain}"
-    fi
+    echo -e "${yellow}配置已保存，支持热重载的 N2X 会读取配置。请使用 N2X log 查看结果。${plain}"
     return 0
 }
 
