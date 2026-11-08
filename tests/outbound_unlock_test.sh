@@ -463,6 +463,69 @@ got="$(printf '{\n  "protocol": "http"\n}\n\n' | outbound_unlock_read_json_block
 python3 -c "import json,sys; json.loads(sys.argv[1])" "$got" \
     || fail "读到的内容不是合法 JSON"
 
+# --- 12c. 选择已有出站并追加代理规则 -----------------------------------------
+reset_files
+outbound_unlock_add "keep" http keep.example.com 80 "" "" 0 "" 0 geosite:anthropic
+outbound_unlock_add "sk5-unlock" socks proxy.example.com 1080 "" "" 0 "" 0 geosite:openai
+cp "$outbound" "$work_dir/outbound-before"
+cp "$route" "$work_dir/route-before"
+
+show_menu() { :; }
+outbound_unlock_restart_hint() { echo restart >> "$work_dir/restarts"; }
+outbound_unlock_menu > "$work_dir/append-log" <<'INPUT'
+2
+99
+2
+geosite:openai aiip.si ippure.com aiip.si
+"regexp:^x[0-9]{1,3}\.example$",
+
+
+
+5
+INPUT
+grep -q '请输入正确的出站编号' "$work_dir/append-log" || fail "未提示无效编号"
+grep -q '已向 sk5-unlock 增加 3 条代理规则' "$work_dir/append-log" || fail "菜单未正确追加规则"
+cmp -s "$outbound" "$work_dir/outbound-before" || fail "追加规则不该改写出站文件"
+python3 - "$route" "$work_dir/route-before" <<'PY' || fail "追加规则改动了目标以外的内容"
+import json, sys
+after, before = (json.load(open(path)) for path in sys.argv[1:])
+target = next(rule for rule in before["rules"] if rule.get("ruleTag") == "custom-unlock-sk5-unlock")
+target["domain"] += ["aiip.si", "ippure.com", r"regexp:^x[0-9]{1,3}\.example$"]
+assert after == before
+PY
+
+cp "$route" "$work_dir/route-after"
+printf '2\naiip.si ippure.com\n\n\n' | outbound_unlock_append_rules_interactive >/dev/null
+printf '2\nnet.coffee\n\nn\n' | outbound_unlock_append_rules_interactive >/dev/null
+cmp -s "$route" "$work_dir/route-after" || fail "重复录入或取消不该改写路由"
+[[ "$(cat "$work_dir/restarts")" == "restart" ]] || fail "只有实际追加时才应重启"
+
+# 手改配置可用 domains 别名和逗号分隔的字符串；两个键都在时 Xray 使用 domains。
+python3 - "$route" <<'PY'
+import json, sys
+path = sys.argv[1]
+with open(path) as f:
+    route = json.load(f)
+target = next(rule for rule in route["rules"] if rule.get("ruleTag") == "custom-unlock-keep")
+target["domains"] = "browserleaks.com,ipinfo.io"
+with open(path, "w") as f:
+    json.dump(route, f)
+PY
+[[ "$(outbound_unlock_py append "$outbound" "$route" keep ipinfo.io ping0.cc)" == 1 ]] \
+    || fail "未正确处理 domains 字段"
+python3 - "$route" <<'PY' || fail "追加写错了有效的域名字段"
+import json, sys
+target = next(rule for rule in json.load(open(sys.argv[1]))["rules"]
+              if rule.get("ruleTag") == "custom-unlock-keep")
+assert target["domain"] == ["geosite:anthropic"]
+assert target["domains"] == ["browserleaks.com", "ipinfo.io", "ping0.cc"]
+PY
+cp "$route" "$work_dir/route-after"
+if outbound_unlock_py append "$outbound" "$route" socks5-unlock net.coffee >/dev/null 2>&1; then
+    fail "默认出站没有自定义路由标记，不应被修改"
+fi
+cmp -s "$route" "$work_dir/route-after" || fail "目标不匹配时不该改写路由"
+
 # --- 13. 接线 ---------------------------------------------------------------
 python3 - "$repo_dir" <<'WIRING' || fail "N2X.sh / install.sh 未正确接入 outbound_unlock.sh"
 from pathlib import Path

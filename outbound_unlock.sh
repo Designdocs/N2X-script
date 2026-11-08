@@ -51,9 +51,12 @@ outbound_unlock_py() {
     local py
     py="$(outbound_unlock_python_bin)" || return 127
     "$py" - "$@" <<'PY'
+import fcntl
 import json
 import os
+import stat
 import sys
+import tempfile
 
 RULE_PREFIX = "custom-unlock"
 
@@ -63,16 +66,53 @@ def load(path):
         return json.load(handle)
 
 
+def load_unlock_config(ob_path, rt_path):
+    outbounds = load(ob_path)
+    route = load(rt_path)
+    if not isinstance(outbounds, list) or not all(isinstance(ob, dict) for ob in outbounds):
+        raise ValueError("custom_outbound.json 必须是出站对象数组")
+    rules = route.get("rules") if isinstance(route, dict) else None
+    if not isinstance(rules, list) or not all(isinstance(rule, dict) for rule in rules):
+        raise ValueError("route.json 必须包含路由规则对象数组")
+    return outbounds, route
+
+
 def write_atomic(path, payload):
-    tmp = path + ".tmp"
-    with open(tmp, "w") as handle:
-        json.dump(payload, handle, ensure_ascii=False, indent=4)
-        handle.write("\n")
-    os.replace(tmp, path)
+    fd, tmp = tempfile.mkstemp(prefix=os.path.basename(path) + ".",
+                               dir=os.path.dirname(os.path.abspath(path)))
+    try:
+        with os.fdopen(fd, "w") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=4)
+            handle.write("\n")
+            os.fchmod(handle.fileno(), stat.S_IMODE(os.stat(path).st_mode))
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
 
 
 def rule_tag(rule):
     return str(rule.get("ruleTag", ""))
+
+
+def managed_tag(rule):
+    tag = rule.get("outboundTag")
+    if isinstance(tag, str) and tag and rule_tag(rule) == "%s-%s" % (RULE_PREFIX, tag):
+        return tag
+    return None
+
+
+def domain_key(rule):
+    # Xray 优先使用非 null 的 domains，即使 domain 也存在。
+    return "domains" if rule.get("domains") is not None else "domain"
+
+
+def domain_entries(value):
+    if isinstance(value, str):
+        return value.split(",")
+    if isinstance(value, list) and all(isinstance(entry, str) for entry in value):
+        return value
+    raise ValueError("域名规则必须是字符串或字符串数组")
 
 
 # 兜底规则没有任何匹配条件，插在它后面的规则永远轮不到。
@@ -129,6 +169,15 @@ KNOWN_PROTOCOLS = {
 }
 
 mode = sys.argv[1]
+
+if mode in ("add", "addraw", "append"):
+    # 锁定配置目录，多个添加操作按顺序读取、写入，进程退出后自动释放。
+    try:
+        lock_fd = os.open(os.path.dirname(os.path.abspath(sys.argv[3])), os.O_RDONLY)
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+    except OSError as exc:
+        sys.stderr.write("锁定解锁配置失败：%s\n" % exc)
+        sys.exit(2)
 
 if mode == "parseurl":
     from urllib.parse import urlsplit, unquote
@@ -247,33 +296,58 @@ if mode == "addraw":
 
 if mode == "tags":
     try:
-        outbounds = load(sys.argv[2])
-        rules = load(sys.argv[3]).get("rules", [])
-    except Exception:
+        outbounds, route = load_unlock_config(sys.argv[2], sys.argv[3])
+    except (OSError, ValueError):
         sys.exit(2)
-    # 以路由规则里的标记为准：出站和规则是一起写进去的，规则更能代表"这条是我加的"
-    tags = [rule_tag(r)[len(RULE_PREFIX) + 1:] for r in rules
-            if rule_tag(r).startswith(RULE_PREFIX + "-")]
     known = {ob.get("tag") for ob in outbounds}
-    print(" ".join(t for t in tags if t in known))
+    tags = []
+    for rule in route["rules"]:
+        tag = managed_tag(rule)
+        if tag and tag in known and tag not in tags:
+            tags.append(tag)
+    print(" ".join(tags))
+    sys.exit(0)
+
+if mode == "append":
+    ob_path, rt_path, tag = sys.argv[2:5]
+    domains = sys.argv[5:]
+    try:
+        outbounds, route = load_unlock_config(ob_path, rt_path)
+        if sum(ob.get("tag") == tag for ob in outbounds) != 1:
+            raise ValueError("出站 %s 不存在或重复" % tag)
+        matches = [rule for rule in route["rules"] if rule_tag(rule) == "%s-%s" % (RULE_PREFIX, tag)]
+        if len(matches) != 1 or managed_tag(matches[0]) != tag:
+            raise ValueError("找不到 %s 对应的唯一自定义路由规则" % tag)
+        rule = matches[0]
+        key = domain_key(rule)
+        existing = domain_entries(rule.get(key))
+        seen = set(existing)
+        added = []
+        for entry in domains:
+            if entry not in seen:
+                added.append(entry)
+                seen.add(entry)
+        if added:
+            rule[key] = existing + added
+            write_atomic(rt_path, route)
+    except (OSError, ValueError) as exc:
+        sys.stderr.write("追加代理规则失败：%s\n" % exc)
+        sys.exit(2)
+    print(len(added))
     sys.exit(0)
 
 if mode == "list":
     try:
-        outbounds = load(sys.argv[2])
-        rules = load(sys.argv[3]).get("rules", [])
-    except Exception:
+        outbounds, route = load_unlock_config(sys.argv[2], sys.argv[3])
+    except (OSError, ValueError):
         sys.exit(2)
     by_tag = {ob.get("tag"): ob for ob in outbounds}
     found = False
-    for rule in rules:
-        tag = rule_tag(rule)
-        if not tag.startswith(RULE_PREFIX + "-"):
-            continue
-        tag = tag[len(RULE_PREFIX) + 1:]
-        ob = by_tag.get(tag)
+    for rule in route["rules"]:
+        ob = by_tag.get(managed_tag(rule))
         if ob is None:
             continue
+        tag = ob["tag"]
         found = True
         srv = (ob.get("settings", {}).get("servers") or [{}])[0]
         auth = "有账号密码" if srv.get("users") else "无账号"
@@ -281,7 +355,7 @@ if mode == "list":
         print("%s\t%s\t%s:%s\t%s / %s" % (
             tag, ob.get("protocol", "?"), srv.get("address", "?"),
             srv.get("port", "?"), auth, tls))
-        for entry in rule.get("domain") or rule.get("domains") or []:
+        for entry in domain_entries(rule.get(domain_key(rule)) or []):
             print("\t  %s" % entry)
     if not found:
         print("(无)")
@@ -788,8 +862,7 @@ outbound_unlock_read_domains() {
     echo -e "${yellow}可以一行一条，也可以整段粘贴——JSON 数组片段（带引号逗号方括号）、${plain}"
     echo -e "${yellow}空格分隔的一长串都认，重复的会自动去掉。${plain}"
     echo -e "${yellow}写法：geosite:openai、domain:openai.com、full:chat.openai.com、regexp:.*openai.*，或直接 openai.com${plain}"
-    while true; do
-        read -rp "  域名条目 #$(( ${#OUTBOUND_UNLOCK_DOMAINS[@]} + 1 ))（空行结束，可整段粘贴）: " line
+    while IFS= read -r -p "  域名条目 #$(( ${#OUTBOUND_UNLOCK_DOMAINS[@]} + 1 ))（空行结束，可整段粘贴）: " line; do
         [[ -z "${line//[[:space:]]/}" ]] && break
         outbound_unlock_collect_domains "$line"
     done
@@ -995,6 +1068,55 @@ outbound_unlock_add_interactive() {
     return 0
 }
 
+outbound_unlock_append_rules_interactive() {
+    local ob rt current choice index tag="" answer added
+    local -a tags OUTBOUND_UNLOCK_DOMAINS
+    ob="$(outbound_unlock_outbound_path)"
+    rt="$(outbound_unlock_route_path)"
+    if ! current="$(outbound_unlock_py tags "$ob" "$rt")"; then
+        echo -e "${red}无法读取自定义解锁，请检查配置文件和 Python 是否可用。${plain}"
+        return 1
+    fi
+    if [[ -z "$current" ]]; then
+        echo -e "${yellow}当前没有自定义解锁，请先添加一条出站。${plain}"
+        return 0
+    fi
+
+    read -r -a tags <<< "$current"
+    echo -e "\n${green}增加代理规则${plain}"
+    for index in "${!tags[@]}"; do
+        echo "  $((index + 1)). ${tags[index]}"
+    done
+    echo "  0. 返回"
+    while read -rp "请选择出站 [0-${#tags[@]}]: " choice; do
+        [[ "$choice" == 0 ]] && return 0
+        for index in "${!tags[@]}"; do
+            if [[ "$choice" == "$((index + 1))" ]]; then
+                tag="${tags[index]}"
+                break 2
+            fi
+        done
+        echo -e "${red}请输入正确的出站编号。${plain}"
+    done
+    [[ -n "$tag" ]] || return 0
+
+    echo "当前出站：${tag}"
+    outbound_unlock_read_domains
+    if [[ ${#OUTBOUND_UNLOCK_DOMAINS[@]} -eq 0 ]]; then
+        echo -e "${yellow}没有录入规则，已返回。${plain}"
+        return 0
+    fi
+    read -rp "确认追加到 ${tag}？[Y/n]: " answer || return 0
+    [[ "$answer" == "n" || "$answer" == "N" ]] && return 0
+    added="$(outbound_unlock_py append "$ob" "$rt" "$tag" "${OUTBOUND_UNLOCK_DOMAINS[@]}")" || return 1
+    if [[ "$added" == 0 ]]; then
+        echo -e "${yellow}输入的规则已全部存在。${plain}"
+        return 0
+    fi
+    echo -e "${green}已向 ${tag} 增加 ${added} 条代理规则。${plain}"
+    outbound_unlock_restart_hint
+}
+
 outbound_unlock_clear_interactive() {
     local answer
     echo -e "${red}清除会把这两个文件恢复成默认内容：${plain}"
@@ -1021,29 +1143,32 @@ outbound_unlock_clear_interactive() {
 }
 
 before_outbound_unlock_menu() {
-    echo && echo -n -e "${yellow}按回车返回出口解锁菜单: ${plain}" && read temp
+    local temp
+    echo && echo -n -e "${yellow}按回车返回出口解锁菜单: ${plain}" && read -r temp || return 0
     outbound_unlock_menu
 }
 
 outbound_unlock_menu() {
-    local current
+    local current num
     current="$(outbound_unlock_tags)"
     [[ -z "$current" ]] && current="（无）"
     echo -e "
   ${green}出口解锁设置${plain}   当前自定义：${current}
 ————————————————
   ${green}1.${plain} 添加自定义解锁（可连续添加）
-  ${green}2.${plain} 查看当前自定义解锁
-  ${green}3.${plain} 清除自定义（恢复两个文件为默认）
-  ${green}4.${plain} 返回 N2X 主菜单
+  ${green}2.${plain} 增加代理规则
+  ${green}3.${plain} 查看当前自定义解锁
+  ${green}4.${plain} 清除自定义（恢复两个文件为默认）
+  ${green}5.${plain} 返回 N2X 主菜单
  "
-    read -rp "请输入选择 [1-4]: " num
+    read -rp "请输入选择 [1-5]: " num || return 0
     case "${num}" in
         1) outbound_unlock_add_interactive; before_outbound_unlock_menu ;;
-        2) outbound_unlock_list; before_outbound_unlock_menu ;;
-        3) outbound_unlock_clear_interactive; before_outbound_unlock_menu ;;
-        4) show_menu ;;
-        *) echo -e "${red}请输入正确的数字 [1-4]${plain}"; before_outbound_unlock_menu ;;
+        2) outbound_unlock_append_rules_interactive; before_outbound_unlock_menu ;;
+        3) outbound_unlock_list; before_outbound_unlock_menu ;;
+        4) outbound_unlock_clear_interactive; before_outbound_unlock_menu ;;
+        5) show_menu ;;
+        *) echo -e "${red}请输入正确的数字 [1-5]${plain}"; before_outbound_unlock_menu ;;
     esac
 }
 
