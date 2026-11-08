@@ -1269,9 +1269,10 @@ download_verified_release() {
     local url="$1" archive="$2" expected actual
     download_file "$url" "$archive" \
         && download_file "$url.dgst" "$archive.dgst" || return 1
-    expected="$(awk '/^SHA(2-)?256[[:space:]]*=/ {
-        sub(/^[^=]*=[[:space:]]*/, "")
-        sub(/[[:space:]]+$/, "")
+    # Older mawk releases do not support POSIX character classes.
+    expected="$(awk '/^SHA(2-)?256[ \t\r\f\v]*=/ {
+        sub(/^[^=]*=[ \t\r\f\v]*/, "")
+        sub(/[ \t\r\f\v]+$/, "")
         print tolower($0)
         exit
     }' "$archive.dgst")"
