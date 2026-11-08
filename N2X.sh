@@ -900,14 +900,21 @@ decoy_command() {
     esac
 }
 
+run_remote_installer() (
+    local stage
+    stage="$(mktemp -d /tmp/n2x-bootstrap.XXXXXX)" || return 1
+    trap 'rm -rf -- "$stage"' EXIT
+    download_managed_shell_file \
+        https://raw.githubusercontent.com/Designdocs/N2X-script/main/install.sh "$stage/install.sh" || return 1
+    bash "$stage/install.sh" "$@"
+)
+
 install() {
-    bash <(curl -Ls https://raw.githubusercontent.com/Designdocs/N2X-script/main/install.sh)
-    if [[ $? == 0 ]]; then
-        if [[ $# == 0 ]]; then
-            start
-        else
-            start 0
-        fi
+    run_remote_installer || return
+    if [[ $# == 0 ]]; then
+        start
+    else
+        start 0
     fi
 }
 
@@ -978,8 +985,7 @@ update() {
     fi
     local install_args=()
     [[ -z "$version" ]] || install_args+=("$version")
-    bash <(curl -Ls https://raw.githubusercontent.com/Designdocs/N2X-script/main/install.sh) "${install_args[@]}"
-    if [[ $? == 0 ]]; then
+    if run_remote_installer "${install_args[@]}"; then
         echo -e "${green}更新完成，已自动重启 N2X，请使用 N2X log 查看运行日志${plain}"
         exit
     fi
@@ -987,6 +993,7 @@ update() {
     if [[ $# == 0 ]]; then
         before_show_menu
     fi
+    return 1
 }
 
 ensure_vim_editor() {
@@ -1211,13 +1218,9 @@ download_managed_shell_file() {
     esac
 
     temporary_path="$(mktemp "${target_path}.tmp.XXXXXX")" || return 1
-    if command -v wget >/dev/null 2>&1; then
-        if ! wget -O "$temporary_path" "$url"; then
-            rm -f "$temporary_path"
-            return 1
-        fi
-    elif ! curl --proto '=https' --tlsv1.2 -fL --retry 3 --retry-delay 2 \
-        -o "$temporary_path" "$url"; then
+    if ! curl -q --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL \
+        --connect-timeout 15 --max-time 180 --retry 2 --retry-delay 2 \
+        -o "$temporary_path" "$url" || [[ ! -s "$temporary_path" ]]; then
         rm -f "$temporary_path"
         return 1
     fi

@@ -7,7 +7,7 @@ trap 'rm -rf "$work_dir"' EXIT
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 source "$repo_dir/geodata.sh"
 eval "$(awk '/^scheduled_release_is_newer\(\) \{$/,/^\}$/' "$repo_dir/install.sh")"
-eval "$(awk '/^download_scheduled_release\(\) \{$/,/^\}$/' "$repo_dir/install.sh")"
+eval "$(awk '/^download_verified_release\(\) \{$/,/^\}$/' "$repo_dir/install.sh")"
 eval "$(awk '/^install_N2X\(\) \{$/ { inside=1 } /^echo -e.*开始安装/ { exit } inside { print }' "$repo_dir/install.sh")"
 
 export TEST_TRACE="$work_dir/trace"
@@ -28,7 +28,7 @@ log_warn() { :; }
 die() { printf '%s\n' "$*" >&2; exit 1; }
 curl() { printf '{ "tag_name": "%s" }\n' "$latest"; }
 pick_asset_suffix() { printf 'linux-64\n'; }
-geodata_download() {
+download_file() {
     printf 'download\n' >> "$TEST_TRACE"
     case "$1" in
         *.zip) cp "$work_dir/fixture.zip" "$2" ;;

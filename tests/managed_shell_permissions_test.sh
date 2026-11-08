@@ -24,17 +24,7 @@ reset_target() {
     command chmod 755 "$target"
 }
 
-# 模拟两种下载器，绝不执行真实下载。
-command() {
-    if [[ "$*" == '-v wget' && "$backend" == curl ]]; then
-        return 1
-    fi
-    builtin command "$@"
-}
-wget() {
-    [[ "$failure" != download ]] || return 1
-    cp "$payload" "$2"
-}
+# 下载使用本地夹具。
 curl() {
     local output=''
     [[ "$failure" != download ]] || return 1
@@ -67,10 +57,11 @@ assert_old_preserved() {
 for script in install.sh N2X.sh; do
     eval "$(awk '/^download_managed_shell_file\(\) \{$/,/^\}$/' "$repo_dir/$script")"
     if [[ "$script" == install.sh ]]; then
+        eval "$(awk '/^download_file\(\) \{$/,/^\}$/' "$repo_dir/$script")"
         eval "$(awk '/^install_managed_shell_file\(\) \{$/,/^\}$/' "$repo_dir/$script")"
-        backends='local wget curl'
+        backends='local curl'
     else
-        backends='wget curl'
+        backends='curl'
     fi
 
     for backend in $backends; do
@@ -108,7 +99,7 @@ for script in install.sh N2X.sh; do
 done
 
 # 还原真实安装顺序：入口替换成功、第二个模块下载失败，入口仍应能运行。
-script=install.sh backend=wget failure=none
+script=install.sh backend=curl failure=none
 write_payload
 eval "$(awk '/^download_managed_shell_file\(\) \{$/,/^\}$/' "$repo_dir/install.sh")"
 eval "$(awk '/^install_managed_shell_file\(\) \{$/,/^\}$/' "$repo_dir/install.sh")"

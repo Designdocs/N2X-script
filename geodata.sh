@@ -292,7 +292,8 @@ maintenance_monthly_update() {
     (
         stage="$(mktemp -d)" || return 1
         trap 'rm -rf "$stage"' EXIT
-        curl -fsSL --connect-timeout 10 --max-time 30 -o "$stage/install.sh" \
+        curl -q --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            -fsSL --connect-timeout 10 --max-time 30 -o "$stage/install.sh" \
             https://raw.githubusercontent.com/Designdocs/N2X-script/main/install.sh \
             && [[ -s "$stage/install.sh" ]] && bash "$stage/install.sh" --scheduled
     )

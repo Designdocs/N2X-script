@@ -178,17 +178,6 @@ require_cmd() {
     command -v "$1" >/dev/null 2>&1 || die "缺少依赖命令: $1，请重试安装或手动安装。"
 }
 
-require_any_cmd() {
-    local a="$1" b="$2"
-    if command -v "$a" >/dev/null 2>&1; then
-        return 0
-    fi
-    if command -v "$b" >/dev/null 2>&1; then
-        return 0
-    fi
-    die "缺少依赖命令: $a 或 $b，请重试安装或手动安装。"
-}
-
 apt_command() {
     DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=3 -o Dpkg::Use-Pty=0 "$@"
 }
@@ -486,11 +475,9 @@ run_apt_with_auto_repair() {
 
 download_file() {
     local url="$1" out="$2"
-    if command -v wget >/dev/null 2>&1; then
-        wget --no-check-certificate -N --progress=bar --tries=3 --timeout=15 -O "$out" "$url"
-    else
-        curl -fL --retry 3 --retry-delay 2 -o "$out" "$url"
-    fi
+    [[ "$url" == https://* ]] || return 1
+    curl -q --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL \
+        --connect-timeout 15 --max-time 180 --retry 2 --retry-delay 2 -o "$out" "$url"
 }
 
 download_managed_shell_file() {
@@ -504,13 +491,7 @@ download_managed_shell_file() {
     esac
 
     temporary_path="$(mktemp "${target_path}.tmp.XXXXXX")" || return 1
-    if command -v wget >/dev/null 2>&1; then
-        if ! wget -O "$temporary_path" "$url"; then
-            rm -f "$temporary_path"
-            return 1
-        fi
-    elif ! curl --proto '=https' --tlsv1.2 -fL --retry 3 --retry-delay 2 \
-        -o "$temporary_path" "$url"; then
+    if ! download_file "$url" "$temporary_path" || [[ ! -s "$temporary_path" ]]; then
         rm -f "$temporary_path"
         return 1
     fi
@@ -754,28 +735,6 @@ cleanup_installation_backup() {
     INSTALL_BACKUP_DIR=""
 }
 
-verify_sha256_if_possible() {
-    local zip_url="$1" zip_path="$2"
-    if ! command -v openssl >/dev/null 2>&1; then
-        return 0
-    fi
-    local dgst_url="${zip_url}.dgst"
-    local dgst_path="${zip_path}.dgst"
-    if download_file "$dgst_url" "$dgst_path" >/dev/null 2>&1; then
-        local expected
-        expected="$(grep -E 'SHA256' "$dgst_path" | awk '{print $2}' | head -n1)"
-        if [[ -n "$expected" ]]; then
-            local actual
-            actual="$(openssl dgst -sha256 "$zip_path" | awk '{print $2}')"
-            if [[ "$expected" != "$actual" ]]; then
-                die "校验失败：sha256 不匹配，请重新下载。"
-            fi
-            log_info "sha256 校验通过。"
-        fi
-    fi
-    rm -f "$dgst_path" >/dev/null 2>&1 || true
-}
-
 cur_dir=$(pwd)
 
 # check root
@@ -930,7 +889,7 @@ install_base() {
 }
 
 verify_dependencies() {
-    require_any_cmd curl wget
+    require_cmd curl
     require_cmd unzip
     require_cmd tar
     require_cmd sed
@@ -1306,19 +1265,37 @@ scheduled_release_is_newer() {
     }'
 }
 
-download_scheduled_release() {
+download_verified_release() {
     local url="$1" archive="$2" expected actual
-    geodata_download "$url" "$archive" \
-        && geodata_download "$url.dgst" "$archive.dgst" || return 1
+    download_file "$url" "$archive" \
+        && download_file "$url.dgst" "$archive.dgst" || return 1
     expected="$(awk '/^SHA(2-)?256[[:space:]]*=/ {
         sub(/^[^=]*=[[:space:]]*/, "")
         sub(/[[:space:]]+$/, "")
         print tolower($0)
         exit
     }' "$archive.dgst")"
-    actual="$(geodata_sha256 "$archive")" || return 1
+    if command -v sha256sum >/dev/null 2>&1; then
+        actual="$(sha256sum "$archive")" || return 1
+        actual="${actual%% *}"
+    elif command -v openssl >/dev/null 2>&1; then
+        actual="$(openssl dgst -sha256 "$archive")" || return 1
+        actual="${actual##* }"
+    else
+        return 1
+    fi
     [[ "$expected" =~ ^[0-9a-f]{64}$ && "$expected" == "$actual" ]]
 }
+
+run_initial_config_wizard() (
+    local wizard_dir
+    wizard_dir="$(mktemp -d /tmp/n2x-init.XXXXXX)" || return 1
+    trap 'rm -rf -- "$wizard_dir"' EXIT
+    download_file https://raw.githubusercontent.com/Designdocs/N2X-script/main/initconfig.sh \
+        "$wizard_dir/initconfig.sh" || return 1
+    [[ -s "$wizard_dir/initconfig.sh" ]] && bash -n "$wizard_dir/initconfig.sh" || return 1
+    source "$wizard_dir/initconfig.sh" && generate_config_file
+)
 
 stage_scheduled_support() {
     local directory="$1" module
@@ -1326,7 +1303,7 @@ stage_scheduled_support() {
     mkdir -p "$directory" || return 1
     for module in N2X.sh config_gen.sh config_append.sh render_config.sh run.sh artx_decoy.sh \
         download_block.sh outbound_unlock.sh geodata.sh; do
-        curl --proto '=https' --proto-redir '=https' -fsSL --connect-timeout 10 --max-time 30 \
+        curl -q --proto '=https' --proto-redir '=https' -fsSL --connect-timeout 10 --max-time 30 \
             -o "$directory/$module" "$base/$module" \
             && [[ -s "$directory/$module" ]] \
             && bash -n "$directory/$module" || return 1
@@ -1367,30 +1344,17 @@ install_N2X() {
         asset_suffix=$(pick_asset_suffix "$last_version") || die "当前架构无可用安装包，请检查发行页面：$last_version"
         log_info "选择下载包: ${asset_suffix}"
         url="https://github.com/Designdocs/N2X/releases/download/${last_version}/N2X-${asset_suffix}.zip"
-        if [[ -n "${scheduled_day:-}" ]]; then
-            download_scheduled_release "$url" "${staging_root}/N2X-linux.zip" || {
-                rm -rf "$staging_root"
-                die "自动升级包下载或 SHA-256 校验失败，已保留当前运行版本。"
-            }
-        else
-            download_file "$url" "${staging_root}/N2X-linux.zip" || {
-                rm -rf "$staging_root" >/dev/null 2>&1 || true
-                die "下载 N2X 失败：$url"
-            }
-            verify_sha256_if_possible "$url" "${staging_root}/N2X-linux.zip"
-        fi
     else
         last_version=$1
         asset_suffix=$(pick_asset_suffix "$last_version") || die "当前架构无可用安装包，请检查发行页面：$last_version"
         log_info "选择下载包: ${asset_suffix}"
         url="https://github.com/Designdocs/N2X/releases/download/${last_version}/N2X-${asset_suffix}.zip"
         log_info "开始安装 N2X $1"
-        download_file "$url" "${staging_root}/N2X-linux.zip" || {
-            rm -rf "$staging_root" >/dev/null 2>&1 || true
-            die "下载 N2X $1 失败：$url"
-        }
-        verify_sha256_if_possible "$url" "${staging_root}/N2X-linux.zip"
     fi
+    download_verified_release "$url" "${staging_root}/N2X-linux.zip" || {
+        rm -rf "$staging_root"
+        die "安装包下载或 SHA-256 校验失败，已保留当前安装。"
+    }
 
     unzip -q "${staging_root}/N2X-linux.zip" -d "$extracted_dir" || {
         rm -rf "$staging_root" >/dev/null 2>&1 || true
@@ -1601,7 +1565,7 @@ EOF
         ln -s /usr/bin/N2X /usr/bin/n2x
         chmod +x /usr/bin/n2x
     fi
-    cd $cur_dir
+    cd -- "$cur_dir" || die "无法返回安装器的启动目录。"
     [[ -n "${scheduled_day:-}" ]] || rm -f install.sh
     echo -e ""
     echo "N2X 管理脚本使用方法 (兼容使用N2X执行，大小写不敏感): "
@@ -1632,10 +1596,7 @@ EOF
         read -rp "检测到你为第一次安装N2X，是否自动生成配置文件？[Y/n]: " if_generate
         if_generate="${if_generate:-Y}"
         if [[ $if_generate == [Yy] ]]; then
-            curl -o ./initconfig.sh -Ls https://raw.githubusercontent.com/Designdocs/N2X-script/main/initconfig.sh
-            source initconfig.sh
-            rm initconfig.sh -f
-            generate_config_file
+            run_initial_config_wizard || log_warn "配置向导执行失败，可稍后运行：N2X generate。"
         else
             log_warn "你可以稍后运行：N2X generate 生成配置文件。"
         fi
