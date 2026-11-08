@@ -6,8 +6,8 @@
 # 反过来规则指向不存在的 outboundTag，xray 会在 dispatcher 里直接掐断连接。所以
 # 全程在临时文件里改，两边都校验通过才一起落盘。
 #
-# 路由规则打 "ruleTag": "custom-unlock-<tag>"，和 download_block.sh 一个路子，靠标
-# 记认自己的东西，不去猜用户手写的规则。
+# 自定义路由规则用 "ruleTag": "custom-unlock-<tag>" 识别。追加规则也支持默认的
+# socks5-unlock，前提是能找到唯一对应的域名规则。
 #
 # 依赖 config_gen.sh 的 write_default_*_json（清除时恢复默认）与 download_block.sh
 # （清除会重写 route.json，得把下载拦截的开关状态原样恢复回去）。调用方 N2X.sh 按
@@ -59,6 +59,7 @@ import sys
 import tempfile
 
 RULE_PREFIX = "custom-unlock"
+DEFAULT_UNLOCK_TAG = "socks5-unlock"
 
 
 def load(path):
@@ -113,6 +114,23 @@ def domain_entries(value):
     if isinstance(value, list) and all(isinstance(entry, str) for entry in value):
         return value
     raise ValueError("域名规则必须是字符串或字符串数组")
+
+
+def append_target(outbounds, route, tag):
+    if sum(ob.get("tag") == tag for ob in outbounds) != 1:
+        raise ValueError("出站 %s 不存在或重复" % tag)
+    if tag == DEFAULT_UNLOCK_TAG:
+        matches = [rule for rule in route["rules"]
+                   if rule.get("outboundTag") == tag and rule.get(domain_key(rule)) is not None]
+        if len(matches) != 1:
+            raise ValueError("找不到 %s 对应的唯一域名规则" % tag)
+    else:
+        matches = [rule for rule in route["rules"] if rule_tag(rule) == "%s-%s" % (RULE_PREFIX, tag)]
+        if len(matches) != 1 or managed_tag(matches[0]) != tag:
+            raise ValueError("找不到 %s 对应的唯一自定义路由规则" % tag)
+    rule = matches[0]
+    key = domain_key(rule)
+    return rule, key, domain_entries(rule.get(key))
 
 
 # 兜底规则没有任何匹配条件，插在它后面的规则永远轮不到。
@@ -294,7 +312,7 @@ if mode == "addraw":
         sys.exit(2)
     sys.exit(0)
 
-if mode == "tags":
+if mode in ("tags", "append-tags"):
     try:
         outbounds, route = load_unlock_config(sys.argv[2], sys.argv[3])
     except (OSError, ValueError):
@@ -305,6 +323,14 @@ if mode == "tags":
         tag = managed_tag(rule)
         if tag and tag in known and tag not in tags:
             tags.append(tag)
+    if mode == "append-tags":
+        tags = [tag for tag in tags if tag != DEFAULT_UNLOCK_TAG]
+        try:
+            append_target(outbounds, route, DEFAULT_UNLOCK_TAG)
+        except ValueError:
+            pass
+        else:
+            tags.append(DEFAULT_UNLOCK_TAG)
     print(" ".join(tags))
     sys.exit(0)
 
@@ -313,14 +339,7 @@ if mode == "append":
     domains = sys.argv[5:]
     try:
         outbounds, route = load_unlock_config(ob_path, rt_path)
-        if sum(ob.get("tag") == tag for ob in outbounds) != 1:
-            raise ValueError("出站 %s 不存在或重复" % tag)
-        matches = [rule for rule in route["rules"] if rule_tag(rule) == "%s-%s" % (RULE_PREFIX, tag)]
-        if len(matches) != 1 or managed_tag(matches[0]) != tag:
-            raise ValueError("找不到 %s 对应的唯一自定义路由规则" % tag)
-        rule = matches[0]
-        key = domain_key(rule)
-        existing = domain_entries(rule.get(key))
+        rule, key, existing = append_target(outbounds, route, tag)
         seen = set(existing)
         added = []
         for entry in domains:
@@ -1068,12 +1087,12 @@ outbound_unlock_append_rules_interactive() {
     local -a tags OUTBOUND_UNLOCK_DOMAINS
     ob="$(outbound_unlock_outbound_path)"
     rt="$(outbound_unlock_route_path)"
-    if ! current="$(outbound_unlock_py tags "$ob" "$rt")"; then
-        echo -e "${red}无法读取自定义解锁，请检查配置文件和 Python 是否可用。${plain}"
+    if ! current="$(outbound_unlock_py append-tags "$ob" "$rt")"; then
+        echo -e "${red}无法读取解锁出站，请检查配置文件和 Python 是否可用。${plain}"
         return 1
     fi
     if [[ -z "$current" ]]; then
-        echo -e "${yellow}当前没有自定义解锁，请先添加一条出站。${plain}"
+        echo -e "${yellow}当前没有可追加代理规则的出站。${plain}"
         return 0
     fi
 

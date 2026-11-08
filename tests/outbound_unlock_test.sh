@@ -524,11 +524,53 @@ target = next(rule for rule in json.load(open(sys.argv[1]))["rules"]
 assert target["domain"] == ["geosite:anthropic"]
 assert target["domains"] == ["browserleaks.com", "ipinfo.io", "ping0.cc"]
 PY
+# 默认出站的路由没有自定义标记，也能从菜单选择并追加。
+reset_files
+python3 - "$outbound" "$route" <<'PY'
+import json, sys
+from pathlib import Path
+
+ob_path, rt_path = map(Path, sys.argv[1:])
+outbounds = json.loads(ob_path.read_text())
+default = next(ob for ob in outbounds if ob.get("tag") == "socks5-unlock")
+default["settings"]["servers"][0]["address"] = "proxy.example.com"
+ob_path.write_text(json.dumps(outbounds))
+
+route = json.loads(rt_path.read_text())
+target = next(rule for rule in route["rules"] if rule.get("outboundTag") == "socks5-unlock")
+target["domain"].append("ip.cx")
+route["rules"].insert(0, {"type": "field", "outboundTag": "socks5-unlock", "port": "8443"})
+rt_path.write_text(json.dumps(route))
+PY
+cp "$outbound" "$work_dir/outbound-before"
+cp "$route" "$work_dir/route-before"
+printf '2\n1\nip.cx net.coffee net.coffee\n\n\n\n5\n' | outbound_unlock_menu > "$work_dir/append-default-log"
+grep -q '已向 socks5-unlock 增加 1 条代理规则' "$work_dir/append-default-log" \
+    || fail "菜单应能向默认出站追加并去重"
+cmp -s "$outbound" "$work_dir/outbound-before" || fail "追加规则不该改写默认出站"
+python3 - "$route" "$work_dir/route-before" <<'PY' || fail "追加默认规则改动了目标以外的内容"
+import json, sys
+after, before = (json.load(open(path)) for path in sys.argv[1:])
+target = next(rule for rule in before["rules"] if rule.get("outboundTag") == "socks5-unlock" and "domain" in rule)
+target["domain"].append("net.coffee")
+assert after == before
+PY
+
+# 同一个默认出站有多条域名规则时，拒绝猜测追加目标。
+python3 - "$route" <<'PY'
+import json, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+route = json.loads(path.read_text())
+route["rules"].insert(0, {"type": "field", "outboundTag": "socks5-unlock", "domain": ["other.example.com"]})
+path.write_text(json.dumps(route))
+PY
 cp "$route" "$work_dir/route-after"
-if outbound_unlock_py append "$outbound" "$route" socks5-unlock net.coffee >/dev/null 2>&1; then
-    fail "默认出站没有自定义路由标记，不应被修改"
+[[ -z "$(outbound_unlock_py append-tags "$outbound" "$route")" ]] || fail "有歧义的默认出站不应列出"
+if outbound_unlock_py append "$outbound" "$route" socks5-unlock ip.cx >/dev/null 2>&1; then
+    fail "有歧义的默认路由应拒绝追加"
 fi
-cmp -s "$route" "$work_dir/route-after" || fail "目标不匹配时不该改写路由"
+cmp -s "$route" "$work_dir/route-after" || fail "拒绝追加不该改写路由"
 
 # --- 13. 接线 ---------------------------------------------------------------
 python3 - "$repo_dir" <<'WIRING' || fail "N2X.sh / install.sh 未正确接入 outbound_unlock.sh"
