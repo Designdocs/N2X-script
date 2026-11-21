@@ -59,7 +59,7 @@ start_pre "$fixture_root/missing-decoy.env"
 printf '%s\n' \
     'N2X_ARTX_DECOY_LISTEN=127.0.0.1:61443' \
     'N2X_ARTX_DECOY_PROFILE=media' \
-    'N2X_ARTX_DECOY_HTTPS_LISTEN=127.0.0.1:8443' \
+    'N2X_ARTX_DECOY_HTTPS_LISTEN=127.0.0.1:50443' \
     'N2X_ARTX_DECOY_HTTPS_CERT_FILE=/etc/N2X/ssl/fullchain.pem' \
     'N2X_ARTX_DECOY_HTTPS_KEY_FILE=/etc/N2X/ssl/privkey.pem' > "$env_path"
 unset N2X_ARTX_DECOY_LISTEN N2X_ARTX_DECOY_PROFILE
@@ -67,7 +67,7 @@ unset N2X_ARTX_DECOY_HTTPS_LISTEN N2X_ARTX_DECOY_HTTPS_CERT_FILE N2X_ARTX_DECOY_
 start_pre "$env_path"
 [[ "$N2X_ARTX_DECOY_LISTEN" == '127.0.0.1:61443' ]]
 [[ "$N2X_ARTX_DECOY_PROFILE" == 'media' ]]
-[[ "$N2X_ARTX_DECOY_HTTPS_LISTEN" == '127.0.0.1:8443' ]]
+[[ "$N2X_ARTX_DECOY_HTTPS_LISTEN" == '127.0.0.1:50443' ]]
 [[ "$N2X_ARTX_DECOY_HTTPS_CERT_FILE" == '/etc/N2X/ssl/fullchain.pem' ]]
 [[ "$N2X_ARTX_DECOY_HTTPS_KEY_FILE" == '/etc/N2X/ssl/privkey.pem' ]]
 
