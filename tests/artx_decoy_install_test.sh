@@ -58,16 +58,25 @@ start_pre "$fixture_root/missing-decoy.env"
 # silently ignore it.
 printf '%s\n' \
     'N2X_ARTX_DECOY_LISTEN=127.0.0.1:61443' \
-    'N2X_ARTX_DECOY_PROFILE=media' > "$env_path"
+    'N2X_ARTX_DECOY_PROFILE=media' \
+    'N2X_ARTX_DECOY_HTTPS_LISTEN=127.0.0.1:8443' \
+    'N2X_ARTX_DECOY_HTTPS_CERT_FILE=/etc/N2X/ssl/fullchain.pem' \
+    'N2X_ARTX_DECOY_HTTPS_KEY_FILE=/etc/N2X/ssl/privkey.pem' > "$env_path"
 unset N2X_ARTX_DECOY_LISTEN N2X_ARTX_DECOY_PROFILE
+unset N2X_ARTX_DECOY_HTTPS_LISTEN N2X_ARTX_DECOY_HTTPS_CERT_FILE N2X_ARTX_DECOY_HTTPS_KEY_FILE
 start_pre "$env_path"
 [[ "$N2X_ARTX_DECOY_LISTEN" == '127.0.0.1:61443' ]]
 [[ "$N2X_ARTX_DECOY_PROFILE" == 'media' ]]
+[[ "$N2X_ARTX_DECOY_HTTPS_LISTEN" == '127.0.0.1:8443' ]]
+[[ "$N2X_ARTX_DECOY_HTTPS_CERT_FILE" == '/etc/N2X/ssl/fullchain.pem' ]]
+[[ "$N2X_ARTX_DECOY_HTTPS_KEY_FILE" == '/etc/N2X/ssl/privkey.pem' ]]
 
 unset N2X_ARTX_DECOY_LISTEN N2X_ARTX_DECOY_PROFILE
+unset N2X_ARTX_DECOY_HTTPS_LISTEN N2X_ARTX_DECOY_HTTPS_CERT_FILE N2X_ARTX_DECOY_HTTPS_KEY_FILE
 printf '%s\n' 'N2X_ARTX_DECOY_LISTEN=127.0.0.1:61443' > "$env_path"
 start_pre "$env_path"
 [[ -z "${N2X_ARTX_DECOY_PROFILE:-}" ]]
+[[ -z "${N2X_ARTX_DECOY_HTTPS_LISTEN:-}${N2X_ARTX_DECOY_HTTPS_CERT_FILE:-}${N2X_ARTX_DECOY_HTTPS_KEY_FILE:-}" ]]
 
 eerror() { :; }
 printf '%s\n' \

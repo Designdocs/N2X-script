@@ -384,6 +384,20 @@ N2X decoy status
 
 管理命令：`N2X decoy status`、`N2X decoy restart`、`N2X decoy log`。`restart` 会先重启并检查诱饵服务，然后重启 N2X 主服务，使修改后的监听地址同时生效。诱饵服务启动失败只会产生告警，不会阻止 N2X 主服务和原有协议运行。
 
+### 给 Snell v6 提供本机 HTTPS 回落
+
+新版 N2X 的内置网页可以同时提供本机 HTTP 和 TLS 1.3。在 `/etc/N2X/artx-decoy.env` 添加以下配置，证书路径改成 VPS 上可读的实际路径。
+
+```dotenv
+N2X_ARTX_DECOY_HTTPS_LISTEN=127.0.0.1:8443
+N2X_ARTX_DECOY_HTTPS_CERT_FILE=/etc/N2X/ssl/fullchain.pem
+N2X_ARTX_DECOY_HTTPS_KEY_FILE=/etc/N2X/ssl/privkey.pem
+```
+
+证书要覆盖面板里填写的 TLS 1.3 握手域名。启用或更新证书后，仅重启 `N2X-artx-decoy` 服务。systemd 用 `systemctl restart N2X-artx-decoy`，Alpine 用 `service N2X-artx-decoy restart`。Alpine 需要先装好支持这些变量的新版服务脚本。
+
+确认本机 HTTPS 可用后，在面板的 Snell v6 节点开启 ShadowTLS v3 和本机网页回落，填写证书域名及本机 HTTPS 端口 `8443`。节点连接端口和服务端口均填 `443`，浏览器和 Snell 客户端便可使用同一个公网 TCP 端口。
+
 管理脚本更新会校验 HTTPS 证书和 shell 语法，再原子替换本地文件。完整 release checksum 绑定需要发布流程提供稳定的签名清单，作为后续发布加固项，本轮不伪造未存在的校验值。
 
 # 一键安装

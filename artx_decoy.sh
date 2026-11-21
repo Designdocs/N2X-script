@@ -82,7 +82,7 @@ command_background="yes"
 
 start_pre() {
     local env_path="${1:-/etc/N2X/artx-decoy.env}"
-    local listen profile
+    local listen profile setting value
 
     [ -e "$env_path" ] || return 0
     listen="$(awk '
@@ -119,6 +119,16 @@ start_pre() {
     if [ -n "$profile" ]; then
         export N2X_ARTX_DECOY_PROFILE="$profile"
     fi
+
+    for setting in N2X_ARTX_DECOY_HTTPS_LISTEN N2X_ARTX_DECOY_HTTPS_CERT_FILE N2X_ARTX_DECOY_HTTPS_KEY_FILE; do
+        value="$(awk -v prefix="${setting}=" '
+            index($0, prefix) == 1 { value = substr($0, length(prefix) + 1) }
+            END { print value }
+        ' "$env_path")" || return 1
+        if [ -n "$value" ]; then
+            export "$setting=$value"
+        fi
+    done
 }
 
 depend() {
