@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 ARTX_DECOY_DEFAULT_LISTEN="127.0.0.1:60443"
+ARTX_DECOY_DEFAULT_HTTPS_LISTEN="127.0.0.1:50443"
 ARTX_DECOY_DEFAULT_PROFILE="balanced"
 ARTX_DECOY_ROOT="${ARTX_DECOY_ROOT:-}"
 ARTX_DECOY_SKIP_SERVICE_ACTIONS="${ARTX_DECOY_SKIP_SERVICE_ACTIONS:-0}"
@@ -22,6 +23,10 @@ artx_decoy_ensure_env() {
             printf 'N2X_ARTX_DECOY_LISTEN=%s\n' "$ARTX_DECOY_DEFAULT_LISTEN"
             printf 'N2X_ARTX_DECOY_PROFILE=%s\n' "$ARTX_DECOY_DEFAULT_PROFILE"
         } > "$env_path" || return 1
+    fi
+    if ! grep -qE '^[[:blank:]]*(#[[:blank:]]*)?N2X_ARTX_DECOY_HTTPS_LISTEN[[:blank:]]*=' "$env_path"; then
+        printf '\n# Uncomment to serve HTTPS with a matching certificate from /etc/N2X.\n# N2X_ARTX_DECOY_HTTPS_LISTEN=%s\n' \
+            "$ARTX_DECOY_DEFAULT_HTTPS_LISTEN" >> "$env_path" || return 1
     fi
     chmod 600 "$env_path" >/dev/null 2>&1 || true
 }

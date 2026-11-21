@@ -15,12 +15,15 @@ artx_decoy_ensure_env
 env_path="$fixture_root/etc/N2X/artx-decoy.env"
 grep -Fqx 'N2X_ARTX_DECOY_LISTEN=127.0.0.1:60443' "$env_path"
 grep -Fqx 'N2X_ARTX_DECOY_PROFILE=balanced' "$env_path"
+grep -Fqx '# N2X_ARTX_DECOY_HTTPS_LISTEN=127.0.0.1:50443' "$env_path"
 
-printf '%s\n' 'N2X_ARTX_DECOY_LISTEN=127.0.0.1:61443' > "$env_path"
+printf '%s' 'N2X_ARTX_DECOY_LISTEN=127.0.0.1:61443' > "$env_path"
+artx_decoy_ensure_env
 artx_decoy_ensure_env
 grep -Fqx 'N2X_ARTX_DECOY_LISTEN=127.0.0.1:61443' "$env_path"
+[[ "$(grep -Fxc '# N2X_ARTX_DECOY_HTTPS_LISTEN=127.0.0.1:50443' "$env_path")" -eq 1 ]]
 if grep -Fq 'N2X_ARTX_DECOY_PROFILE' "$env_path"; then
-    echo 'ensure_env must not rewrite an existing env file' >&2
+    echo 'ensure_env must preserve the existing profile configuration' >&2
     exit 1
 fi
 
@@ -47,8 +50,10 @@ fi
 # shellcheck disable=SC1090
 source "$openrc_path"
 unset N2X_ARTX_DECOY_LISTEN
+unset N2X_ARTX_DECOY_HTTPS_LISTEN
 start_pre "$env_path"
 [[ "$N2X_ARTX_DECOY_LISTEN" == '127.0.0.1:61443' ]]
+[[ -z "${N2X_ARTX_DECOY_HTTPS_LISTEN:-}" ]]
 unset N2X_ARTX_DECOY_LISTEN
 start_pre "$fixture_root/missing-decoy.env"
 [[ -z "${N2X_ARTX_DECOY_LISTEN:-}" ]]
@@ -59,15 +64,18 @@ start_pre "$fixture_root/missing-decoy.env"
 printf '%s\n' \
     'N2X_ARTX_DECOY_LISTEN=127.0.0.1:61443' \
     'N2X_ARTX_DECOY_PROFILE=media' \
-    'N2X_ARTX_DECOY_HTTPS_LISTEN=127.0.0.1:50443' \
+    'N2X_ARTX_DECOY_HTTPS_LISTEN=127.0.0.1:8443' \
     'N2X_ARTX_DECOY_HTTPS_CERT_FILE=/etc/N2X/ssl/fullchain.pem' \
     'N2X_ARTX_DECOY_HTTPS_KEY_FILE=/etc/N2X/ssl/privkey.pem' > "$env_path"
+cp "$env_path" "$fixture_root/active-https.env"
+artx_decoy_ensure_env
+cmp "$fixture_root/active-https.env" "$env_path"
 unset N2X_ARTX_DECOY_LISTEN N2X_ARTX_DECOY_PROFILE
 unset N2X_ARTX_DECOY_HTTPS_LISTEN N2X_ARTX_DECOY_HTTPS_CERT_FILE N2X_ARTX_DECOY_HTTPS_KEY_FILE
 start_pre "$env_path"
 [[ "$N2X_ARTX_DECOY_LISTEN" == '127.0.0.1:61443' ]]
 [[ "$N2X_ARTX_DECOY_PROFILE" == 'media' ]]
-[[ "$N2X_ARTX_DECOY_HTTPS_LISTEN" == '127.0.0.1:50443' ]]
+[[ "$N2X_ARTX_DECOY_HTTPS_LISTEN" == '127.0.0.1:8443' ]]
 [[ "$N2X_ARTX_DECOY_HTTPS_CERT_FILE" == '/etc/N2X/ssl/fullchain.pem' ]]
 [[ "$N2X_ARTX_DECOY_HTTPS_KEY_FILE" == '/etc/N2X/ssl/privkey.pem' ]]
 

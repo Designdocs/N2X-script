@@ -373,6 +373,8 @@ N2X 安装和升级会部署一个独立的本地 Web companion。它使用同�
 
 ```dotenv
 N2X_ARTX_DECOY_LISTEN=127.0.0.1:60443
+N2X_ARTX_DECOY_PROFILE=balanced
+# N2X_ARTX_DECOY_HTTPS_LISTEN=127.0.0.1:50443
 ```
 
 需要修改端口时，编辑 `/etc/N2X/artx-decoy.env`，然后执行：
@@ -386,19 +388,24 @@ N2X decoy status
 
 ### 给 Snell v6 提供本机 HTTPS 回落
 
-新版 N2X 的内置网页可以同时提供本机 HTTP 和 TLS 1.3。在 `/etc/N2X/artx-decoy.env` 添加以下配置，证书路径改成 VPS 上可读的实际路径。
+新版 N2X 的内置网页可以同时提供本机 HTTP 和 TLS 1.3。安装和升级会在 `/etc/N2X/artx-decoy.env` 补上 HTTPS 配置示例。在使用内置网页为 Snell 回落的 VPS 上，取消这一行的注释即可开启 HTTPS。
 
 ```dotenv
 N2X_ARTX_DECOY_HTTPS_LISTEN=127.0.0.1:50443
+```
+
+内置网页按握手域名自动复用 `/etc/N2X/` 下匹配且受信任的证书和私钥，包括 `fullchain-域名.cer` 和 `cert-域名.key`，以及旧版的 `fullchain.cer` 和 `cert.key`。通配符证书按证书实际覆盖的域名匹配。N2X 自动签发或续签后，新连接会在 30 秒内读取更新。使用自定义文件名或其他目录的证书时，在同一个配置文件中填写两条实际路径。
+
+```dotenv
 N2X_ARTX_DECOY_HTTPS_CERT_FILE=/etc/N2X/ssl/fullchain.pem
 N2X_ARTX_DECOY_HTTPS_KEY_FILE=/etc/N2X/ssl/privkey.pem
 ```
 
-证书要覆盖面板里填写的 TLS 1.3 握手域名。启用或更新证书后，仅重启 `N2X-artx-decoy` 服务。systemd 用 `systemctl restart N2X-artx-decoy`，Alpine 用 `service N2X-artx-decoy restart`。Alpine 需要先装好支持这些变量的新版服务脚本。
+证书要覆盖面板里填写的 TLS 1.3 握手域名。开启 HTTPS、更改配置或更新手动指定的证书后，重启 `N2X-artx-decoy` 服务。systemd 用 `systemctl restart N2X-artx-decoy`，Alpine 用 `service N2X-artx-decoy restart`。
 
 确认本机 HTTPS 可用后，在面板的 Snell v6 节点开启 ShadowTLS v3 和本机网页回落，填写证书域名及本机 HTTPS 端口 `50443`。节点连接端口和服务端口均填 `443`，浏览器和 Snell 客户端便可使用同一个公网 TCP 端口。
 
-升级已有节点前，将 `N2X_ARTX_DECOY_HTTPS_LISTEN` 显式设为面板已保存的网页端口。面板使用 `8443` 时，这里填 `127.0.0.1:8443`。
+升级会保留已有的 HTTPS 监听端口。内置网页端口要和面板一致。面板使用 `8443` 时，这里填 `127.0.0.1:8443`。
 
 管理脚本更新会校验 HTTPS 证书和 shell 语法，再原子替换本地文件。完整 release checksum 绑定需要发布流程提供稳定的签名清单，作为后续发布加固项，本轮不伪造未存在的校验值。
 
