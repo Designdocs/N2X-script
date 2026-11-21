@@ -253,11 +253,41 @@ assert [(n["NodeID"], n["NodeType"]) for n in d["Nodes"]] == [
 assert [c["Type"] for c in d["Cores"]] == ["xray", "sing"], "核心不该重复追加"
 '
 
+# Snell 只读取 NodeID 和协议选择。已有证书的 Xray 节点也不会成为它的证书来源。
+new_case "$xray_config"
+if ! run_append ";4243;12;"; then
+    fail "在 xray 配置上追加 Snell v6 失败"
+fi
+assert_config "Snell v6 应自动添加 sing 核心并跳过证书及 DDNS" '
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert [c["Type"] for c in d["Cores"]] == ["xray", "sing"], d["Cores"]
+old, new = d["Nodes"]
+assert new["NodeID"] == 4243 and new["NodeType"] == "snell" and new["Core"] == "sing", new
+assert new["ApiHost"] == old["ApiHost"] and new["ApiKey"] == old["ApiKey"]
+assert new["CertConfig"] == {"CertMode": "none"} and "DDNSConfig" not in new, new
+assert "ShadowTLSOptions" not in new, new
+'
+
+new_case "$sing_config"
+if ! run_append "4243;12;"; then
+    fail "只配置 sing 核心时追加 Snell v6 不应询问 xray DNS"
+fi
+assert_config "追加 Snell v6 后应复用现有 sing 核心" '
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert [c["Type"] for c in d["Cores"]] == ["sing"], d["Cores"]
+old, new = d["Nodes"]
+assert new["NodeID"] == 4243 and new["NodeType"] == "snell", new
+assert new["ApiHost"] == old["ApiHost"] and new["ApiKey"] == old["ApiKey"]
+assert new["CertConfig"] == {"CertMode": "none"}, new
+'
+
 # --- 3. sing 配置上追加 xray 协议，并补齐配套文件 ---------------------------
 new_case "$sing_config"
-# 现有节点用的是 ${N2X_API_HOST} 占位符，不会问是否沿用；先问自定义 DNS(y)，
-# 再 NodeID 7；协议 2=vless；不是 reality(n)；不配 TLS(n)；回车不再继续
-if ! run_append "y;7;2;n;n;"; then
+# 面板占位符直接沿用；NodeID 7；协议 2=vless；不是 reality(n)；
+# 自定义 DNS(y)；不配 TLS(n)；回车不再继续
+if ! run_append "7;2;n;y;n;"; then
     fail "在 sing 配置上追加 xray 节点失败"
 fi
 
@@ -314,9 +344,9 @@ if [[ "$before" != "$(cat "${N2X_CONFIG_DIR}/config.json")" ]]; then
     fail "拒绝确认后不应改动配置"
 fi
 
-# 同意之后正常合并：y=确认丢注释；回车沿用 API；n=不开自定义 DNS；
-# NodeID 9；协议 9=tuic；域名回车（现有节点没有证书，取默认值）；证书 1=http；n=结束
-if ! run_append "y;;n;9;9;;1;n;n"; then
+# y=确认丢注释；回车沿用 API；NodeID 9；协议 9=tuic；域名回车；
+# 证书 1=http；n=关闭 DDNS；n=结束
+if ! run_append "y;;9;9;;1;n;n"; then
     fail "带注释的配置应当在确认后可以追加"
 fi
 assert_config "带注释的配置合并后不符合预期" '

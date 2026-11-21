@@ -13,6 +13,7 @@ N2X 同时运行 xray 与 sing-box 两个核心，配置向导（`N2X config` / 
 | Hysteria2 / TUIC | sing-box | 必需 |
 | ShadowTLS | sing-box | 不需要，借用握手目标站点的证书 |
 | NaiveProxy | sing-box | 必需 |
+| Snell v6 | sing-box | 无需节点证书 |
 
 AnyTLS 在菜单里出现两次，分别对应 xray 与 sing-box 两套实现，可以同时部署在不同节点上，
 互不影响；节点里的 `"Core"` 字段决定由哪个核心承载。
@@ -22,7 +23,7 @@ NaiveProxy 增删用户会重建监听器并断开在途连接（sing-box 的 na
 
 配置生成的实现集中在 `config_gen.sh`，`initconfig.sh`、`N2X.sh`、`config_append.sh` 与
 `install.sh` 只负责调用，不再各自维护一份副本。`tests/node_protocol_matrix_test.sh` 会把
-全部 11 个协议跑一遍并校验产出的 JSON。
+全部 12 个菜单选项跑一遍并校验产出的 JSON。
 
 xray 配套文件 `dns.json` / `custom_outbound.json` / `route.json` 的默认内容同样只有
 `config_gen.sh` 一份（`write_default_*_json`）。全新安装时由 `install.sh` 写入，写不出来会
@@ -131,6 +132,7 @@ DDNS 默认关闭。安装、生成配置和追加节点共用同一套引导：
 
 追加（`config_append.sh`）的具体行为：
 
+- 添加 Snell v6 时，输入面板上的节点 ID 并选择 `12. Snell v6`。脚本自动使用 sing-box 并跳过 TLS、证书域名、申请证书和 DDNS。PSK 与可选的 ShadowTLS 参数沿用面板下发的配置。
 - 只在缺少对应核心时才往 `Cores` 里补一条。新节点走 sing 而配置里只有 xray，就补一条 sing；
   该核心已存在则不动它，已经改过的 `ConnectionConfig`、`NTP` 等参数都保留。
 - `NodeID + 协议 + 核心`三者都相同的节点视为重复，跳过并提示，不会写进去。同一个 NodeID

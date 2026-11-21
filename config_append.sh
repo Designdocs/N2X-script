@@ -157,19 +157,15 @@ DNSENV_PLACEHOLDERS = (
 def cert_donor(nodes):
     """挑一个可继承证书信息的现有节点：优先最后一个真正用证书的节点。"""
     donor = None
+    fallback = None
     for node in nodes:
         cert = node.get('CertConfig')
-        if not isinstance(cert, dict):
+        if node.get('NodeType') == 'snell' or not isinstance(cert, dict):
             continue
+        fallback = cert
         if str(cert.get('CertMode') or 'none') != 'none':
             donor = cert
-    if donor is not None:
-        return donor
-    for node in nodes:
-        cert = node.get('CertConfig')
-        if isinstance(cert, dict):
-            donor = cert
-    return donor
+    return donor if donor is not None else fallback
 
 
 def inherit_cert(new_node, donor):
@@ -332,6 +328,7 @@ def do_merge(config_path, nodes_path, cores_path, out_path):
     seen = set(node_key(node) for node in nodes if isinstance(node, dict))
     added = 0
     skipped = 0
+    check_certificate = False
     for node in new_nodes:
         if not isinstance(node, dict):
             continue
@@ -348,6 +345,9 @@ def do_merge(config_path, nodes_path, cores_path, out_path):
         nodes.append(node)
         seen.add(key)
         added += 1
+        cert = node.get('CertConfig')
+        if isinstance(cert, dict) and cert.get('CertMode') in ('http', 'dns'):
+            check_certificate = True
 
     if added == 0:
         for line in messages:
@@ -372,6 +372,8 @@ def do_merge(config_path, nodes_path, cores_path, out_path):
         print('新增核心：{0}'.format('、'.join(cores_added)))
     else:
         print('核心无需变动（所需核心已存在）。')
+    if check_certificate:
+        print('  使用 HTTP 或 DNS 自动申请证书的节点，请确认域名解析与 API 参数。')
 
 
 mode = sys.argv[1] if len(sys.argv) > 1 else ''
@@ -476,7 +478,7 @@ select_append_api_info() {
 append_node_configs() {
     local cfg_dir cfg facts trimmed has_xray has_sing existing_dns node_count
     local existing_host existing_key existing_domain node_table answer tmp_dir nodes_str core_list
-    local add_xray=false add_sing=false saved_xray saved_sing new_cores merge_status
+    local add_xray=false add_sing=false saved_xray saved_sing new_cores merge_status ask_xray_dns
 
     cfg_dir="$(n2x_config_dir)"
     cfg="$cfg_dir/config.json"
@@ -544,23 +546,7 @@ EOF
 
     select_append_api_info "$existing_host" "$existing_key" "$cfg_dir"
 
-    # 自定义 DNS 只影响 xray 节点，跟着现有 xray 核心走；还没有 xray 核心时才问。
-    if [[ "$has_xray" == "true" ]]; then
-        if [[ "$existing_dns" == "true" ]]; then
-            custom_dns_enabled=true
-            echo -e "${green}现有 xray 核心已配置 DnsConfigPath，新增的 xray 节点同样开启 EnableDNS/DNSType=UseIP。${plain}"
-        else
-            custom_dns_enabled=false
-            echo -e "${green}现有 xray 核心未配置 DnsConfigPath，新增的 xray 节点保持 EnableDNS=false。${plain}"
-        fi
-    else
-        read -rp "是否开启自定义 DNS（仅新增 xray 节点时生效）？(y/n) " answer
-        if [[ "$answer" == "y" || "$answer" == "Y" ]]; then
-            custom_dns_enabled=true
-        else
-            custom_dns_enabled=false
-        fi
-    fi
+    custom_dns_enabled="$existing_dns"
 
     # 证书域名回车默认沿用现有节点的，没有才用 config_gen.sh 的默认值。
     local cert_domain_default="$existing_domain"
@@ -569,7 +555,11 @@ EOF
     core_xray=false
     core_sing=false
     while true; do
-        add_node_config
+        ask_xray_dns=false
+        if [[ "$has_xray" != "true" && "$core_xray" != "true" ]]; then
+            ask_xray_dns=true
+        fi
+        add_node_config "$ask_xray_dns"
         read -rp "是否继续添加节点配置？(y继续，回车或n退出)" answer
         if [[ ! "$answer" =~ ^[Yy]([Ee][Ss])?$ ]]; then
             break

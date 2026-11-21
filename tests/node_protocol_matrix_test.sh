@@ -33,8 +33,8 @@ custom_dns_enabled=false
 # The wizard input is the dialogue after the node id, one answer per ';'.
 # Protocols that force TLS skip the "是否进行TLS配置" question and go straight
 # to the domain prompt (empty = default) and the cert-mode menu (1 = http);
-# vless asks about reality first; shadowtls needs no certificate and asks for
-# its handshake target instead.
+# vless asks about reality first; shadowtls asks for its handshake target;
+# snell receives all protocol parameters from the panel.
 matrix=(
     "1|shadowsocks|xray|http|1;y;n1.test.com;1"
     "2|vless|xray|none|2;n;n"
@@ -47,6 +47,7 @@ matrix=(
     "9|tuic|sing|http|9;;1"
     "10|shadowtls|sing|none|10;"
     "11|naive|sing|http|11;;1"
+    "12|snell|sing|none|12"
 )
 
 # Feeds a ';'-separated dialogue to add_node_config.
@@ -95,7 +96,7 @@ for row in "${matrix[@]}"; do
     if ! result=$(printf '%s' "$node_json" | python3 -c '
 import json, sys
 n = json.load(sys.stdin)
-print(n["NodeType"], n["Core"], n["CertConfig"]["CertMode"], n["NodeID"], n["CertConfig"]["CertDomain"])
+print(n["NodeType"], n["Core"], n["CertConfig"]["CertMode"], n["NodeID"], n["CertConfig"].get("CertDomain", ""))
 ' 2>&1); then
         echo "FAIL choice ${choice} (${want_type}): invalid JSON" >&2
         echo "$result" >&2
@@ -107,9 +108,10 @@ print(n["NodeType"], n["Core"], n["CertConfig"]["CertMode"], n["NodeID"], n["Cer
     read -r got_type got_core got_cert got_id got_domain <<<"$result"
 
     # Enter at the domain prompt takes the default; a typed domain is kept;
-    # nodes without a certificate keep the placeholder.
+    # cert-less protocols keep the legacy placeholder except for Snell.
     case "$choice:$want_cert" in
         1:* ) want_domain="n1.test.com" ;;
+        12:* ) want_domain="" ;;
         *:none ) want_domain="all.example.com" ;;
         * ) want_domain="all.nom-loc.com" ;;
     esac
@@ -167,6 +169,9 @@ import json, sys
 n = json.load(sys.stdin)
 for key in ("ShadowTLSOptions", "NaiveOptions", "ArtXOptions"):
     assert key not in n, key + " leaked into an unrelated protocol"
+if n["NodeType"] == "snell":
+    assert n["CertConfig"] == {"CertMode": "none"}, n
+    assert "DDNSConfig" not in n, n
 ' || { echo "FAIL choice ${choice}: protocol option leaked" >&2; failures=$((failures + 1)); }
             ;;
     esac
@@ -243,4 +248,4 @@ if (( failures > 0 )); then
     exit 1
 fi
 
-echo "node protocol matrix is aligned (11 protocols, 2 cores)"
+echo "node protocol matrix is aligned (${#matrix[@]} choices, 2 cores)"

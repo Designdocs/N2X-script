@@ -1559,9 +1559,7 @@ add_protocol_config() {
     echo -e "${green}原配置仍会备份到 /etc/N2X/config.json.bak。${plain}"
 
     if append_node_configs; then
-        echo -e "${yellow}下一步建议：${plain}"
-        echo -e "1. 检查 /etc/N2X/config.json 中新增的节点"
-        echo -e "2. 证书模式为 dns/http 时确认域名解析与 API 参数无误"
+        echo -e "${yellow}请检查 $(n2x_config_dir)/config.json 中新增的节点。${plain}"
         echo -e "${yellow}正在重启 N2X 服务...${plain}"
         restart 0
     fi

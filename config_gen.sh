@@ -34,11 +34,10 @@ check_ipv6_support() {
 # 同时运行。AnyTLS 两个核心都实现了，所以菜单里出现两次——节点用 "Core" 指定
 # 走哪一个，互不影响。
 #
-# 设置：NodeType / core / core_xray / core_sing / isreality / istls / nocert
+# 设置：NodeType / core / core_xray / core_sing / isreality / istls
 select_node_protocol() {
     isreality=""
     istls=""
-    nocert=""
 
     echo -e "${yellow}请选择节点传输协议：${plain}"
     echo -e "${yellow}  —— Xray 核心 ——${plain}"
@@ -54,6 +53,7 @@ select_node_protocol() {
     echo -e "${green}   9. TUIC${plain}（仅支持 V5）"
     echo -e "${green}  10. ShadowTLS${plain}（需面板支持该协议）"
     echo -e "${green}  11. NaiveProxy${plain}"
+    echo -e "${green}  12. Snell v6${plain}"
     read -rp "请输入：" node_choice
     case "$node_choice" in
         1  ) NodeType="shadowsocks"; core="xray" ;;
@@ -65,8 +65,9 @@ select_node_protocol() {
         7  ) NodeType="anytls";      core="sing"; istls="y" ;;
         8  ) NodeType="hysteria";    core="sing"; istls="y" ;;
         9  ) NodeType="tuic";        core="sing"; istls="y" ;;
-        10 ) NodeType="shadowtls";   core="sing"; nocert="y" ;;
+        10 ) NodeType="shadowtls";   core="sing" ;;
         11 ) NodeType="naive";       core="sing"; istls="y" ;;
+        12 ) NodeType="snell";       core="sing" ;;
         *  ) NodeType="shadowsocks"; core="xray" ;;
     esac
 
@@ -98,11 +99,13 @@ select_cert_mode() {
     # 不需要证书的节点保持占位值，追加协议时 config_append.sh 靠它判断能否继承。
     certdomain="all.example.com"
 
-    if [ "$nocert" == "y" ]; then
-        # ShadowTLS 直接借用握手目标站点的证书，自己不需要证书。
-        echo -e "${green}ShadowTLS 借用握手目标站点的证书，无需申请自有证书，CertMode 保持 none。${plain}"
-        return
-    fi
+    case "$NodeType" in
+        snell ) return ;;
+        shadowtls )
+            echo -e "${green}ShadowTLS 借用握手目标站点的证书，无需申请自有证书，CertMode 保持 none。${plain}"
+            return
+            ;;
+    esac
 
     if [[ "$isreality" != "y" && "$isreality" != "Y" &&  "$istls" != "y" ]]; then
         read -rp "请选择是否进行TLS配置？(y/n)" istls
@@ -252,8 +255,47 @@ node_extra_options() {
     fi
 }
 
-# 节点配置生成
+node_certificate_options() {
+    if [[ "$NodeType" == "snell" ]]; then
+        # 面板负责下发 Snell 参数及可选的 ShadowTLS 握手目标。
+        cat <<'EOF'
+            "CertConfig": {
+                "CertMode": "none"
+            }
+EOF
+        return
+    fi
+
+    cat <<EOF
+            "CertConfig": {
+                "CertMode": "$certmode",
+                "RejectUnknownSni": false,
+                "CertDomain": "$certdomain",
+                "CertFile": "/etc/N2X/fullchain-{domain}.cer",
+                "KeyFile": "/etc/N2X/cert-{domain}.key",
+                "Email": "example@gmail.com",
+                "Provider": "cloudflare",
+                "DNSEnv": {
+                    "CF_DNS_API_TOKEN": "ExampleTOKEN"
+                }
+            },
+            "DDNSConfig": {
+                "Enabled": $ddns_enabled,
+                "Provider": "$ddns_provider",
+                "Domain": "",
+                "ZoneName": "",
+                "RecordType": "A",
+                "Interval": 300,
+                "TTL": 600,
+                "IPURL": "",
+                "DNSEnv": $ddns_env
+            }
+EOF
+}
+
+# 节点配置生成。追加时可在首次选中 xray 后询问其 DNS 选项。
 add_node_config() {
+    local ask_xray_dns="${1:-false}" dns_answer
     core="xray"
     while true; do
         read -rp "请输入节点Node ID：" NodeID
@@ -266,6 +308,14 @@ add_node_config() {
     done
 
     select_node_protocol
+    if [[ "$core" == "xray" && "$ask_xray_dns" == "true" ]]; then
+        read -rp "是否开启自定义 DNS（xray）？(y/n) " dns_answer || dns_answer=""
+        if [[ "$dns_answer" == "y" || "$dns_answer" == "Y" ]]; then
+            custom_dns_enabled=true
+        else
+            custom_dns_enabled=false
+        fi
+    fi
     select_cert_mode
     select_ddns
 
@@ -293,29 +343,7 @@ add_node_config() {
             "DeviceOnlineMinTraffic": 200,
             "ReportMinTraffic": 0,
 $(node_extra_options)
-            "CertConfig": {
-                "CertMode": "$certmode",
-                "RejectUnknownSni": false,
-                "CertDomain": "$certdomain",
-                "CertFile": "/etc/N2X/fullchain-{domain}.cer",
-                "KeyFile": "/etc/N2X/cert-{domain}.key",
-                "Email": "example@gmail.com",
-                "Provider": "cloudflare",
-                "DNSEnv": {
-                    "CF_DNS_API_TOKEN": "ExampleTOKEN"
-                }
-            },
-            "DDNSConfig": {
-                "Enabled": $ddns_enabled,
-                "Provider": "$ddns_provider",
-                "Domain": "",
-                "ZoneName": "",
-                "RecordType": "A",
-                "Interval": 300,
-                "TTL": 600,
-                "IPURL": "",
-                "DNSEnv": $ddns_env
-            }
+$(node_certificate_options)
         },
 EOF
 )
@@ -386,7 +414,7 @@ config_help_block() {
         "Cores.Sing.NTP": "Enable=true 时 sing 核心自行校时，适用于宿主机时间不准导致 TUIC/Hysteria2 握手失败的情况；ServerPort=0 表示使用默认 123。",
         "Cores.Sing.OriginalPath": "填写自定义 sing-box 基础配置的绝对路径，留空使用内置默认；只能使用 N2X 已注册的入站/出站类型。",
         "Nodes.Basic": "Core 填 xray 或 sing；NodeID 填面板节点数字 ID；Timeout 单位为秒。",
-        "Nodes.NodeType": "xray 核心可填 shadowsocks/vless/vmess/trojan/anytls/artx；sing 核心可填 shadowsocks/vless/vmess/trojan/anytls/hysteria/tuic/shadowtls/naive。anytls 两个核心都支持，用 Core 指定由谁承载。hysteria 节点填 hysteria 即可，V1/V2 由面板下发的 version 决定；tuic 仅支持 V5；shadowtls 需要面板支持该协议类型。",
+        "Nodes.NodeType": "xray 核心可填 shadowsocks/vless/vmess/trojan/anytls/artx；sing 核心可填 shadowsocks/vless/vmess/trojan/anytls/hysteria/tuic/shadowtls/naive/snell。anytls 两个核心都支持，用 Core 指定由谁承载。hysteria 节点填 hysteria 即可，V1/V2 由面板下发的 version 决定；tuic 仅支持 V5；shadowtls 需要面板支持该协议类型；snell 为 v6，协议参数由面板下发。",
         "Nodes.API": "ApiHost 填面板完整 HTTP(S) 地址且不带接口路径；ApiKey 填面板对接密钥。",
         "Nodes.WebSocket": "Enabled=false 时仅使用 HTTP；URL 留空会根据 ApiHost 自动生成，也可填写完整 ws:// 或 wss:// 地址；Debug 仅排障时开启。",
         "Nodes.Traffic": "DeviceOnlineMinTraffic 和 ReportMinTraffic 的单位均为 KB；ReportMinTraffic=0 表示不设置最低上报流量。",
