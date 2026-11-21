@@ -100,7 +100,11 @@ select_cert_mode() {
     certdomain="all.example.com"
 
     case "$NodeType" in
-        snell ) return ;;
+        snell )
+            echo -e "${green}可在管理端为此节点开启 ShadowTLS v3，填写 TLS 1.3 握手主机、握手端口和密码。${plain}"
+            echo -e "${green}握手可以使用自有或第三方 HTTPS 网站的现有证书。${plain}"
+            return
+            ;;
         shadowtls )
             echo -e "${green}ShadowTLS 借用握手目标站点的证书，无需申请自有证书，CertMode 保持 none。${plain}"
             return
