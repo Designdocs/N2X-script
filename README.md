@@ -403,7 +403,7 @@ N2X_ARTX_DECOY_HTTPS_KEY_FILE=/etc/N2X/ssl/privkey.pem
 
 证书要覆盖面板里填写的 TLS 1.3 握手域名。开启 HTTPS、更改配置或更新手动指定的证书后，重启 `N2X-artx-decoy` 服务。systemd 用 `systemctl restart N2X-artx-decoy`，Alpine 用 `service N2X-artx-decoy restart`。
 
-确认本机 HTTPS 可用后，在面板的 Snell v6 节点开启 ShadowTLS v3 和本机网页回落，填写证书域名及本机 HTTPS 端口 `50443`。节点连接端口和服务端口均填 `443`，浏览器和 Snell 客户端便可使用同一个公网 TCP 端口。
+确认本机 HTTPS 可用后，在面板的 Snell v6 节点开启「本机网页回落」，填写证书域名及本机 HTTPS 端口 `50443`。节点连接端口和服务端口均填 `443`，浏览器和 Snell 客户端便可使用同一个公网 TCP 端口。新版 N2X 支持关闭 ShadowTLS v3 后单独开启回落，客户端可继续使用 Snell 直连配置。
 
 升级会保留已有的 HTTPS 监听端口。内置网页端口要和面板一致。面板使用 `8443` 时，这里填 `127.0.0.1:8443`。
 
