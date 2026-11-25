@@ -101,6 +101,8 @@ select_cert_mode() {
 
     case "$NodeType" in
         snell )
+            certmode="dns"
+            certdomain="$DEFAULT_CERT_DOMAIN"
             echo -e "${green}可在管理端为此节点开启 ShadowTLS v3，填写 TLS 1.3 握手主机、握手端口和密码。${plain}"
             echo -e "${green}握手可以使用自有或第三方 HTTPS 网站的现有证书。${plain}"
             return
@@ -260,14 +262,10 @@ node_extra_options() {
 }
 
 node_certificate_options() {
+    local email="example@gmail.com" token="ExampleTOKEN"
     if [[ "$NodeType" == "snell" ]]; then
-        # 面板负责下发 Snell 参数及可选的 ShadowTLS 握手目标。
-        cat <<'EOF'
-            "CertConfig": {
-                "CertMode": "none"
-            }
-EOF
-        return
+        email="smusicssr@gmail.com"
+        token=""
     fi
 
     cat <<EOF
@@ -277,11 +275,17 @@ EOF
                 "CertDomain": "$certdomain",
                 "CertFile": "/etc/N2X/fullchain-{domain}.cer",
                 "KeyFile": "/etc/N2X/cert-{domain}.key",
-                "Email": "example@gmail.com",
+                "Email": "$email",
                 "Provider": "cloudflare",
                 "DNSEnv": {
-                    "CF_DNS_API_TOKEN": "ExampleTOKEN"
+                    "CF_DNS_API_TOKEN": "$token"
                 }
+EOF
+    if [[ "$NodeType" == "snell" ]]; then
+        echo '            }'
+        return
+    fi
+    cat <<EOF
             },
             "DDNSConfig": {
                 "Enabled": $ddns_enabled,
@@ -321,7 +325,9 @@ add_node_config() {
         fi
     fi
     select_cert_mode
-    select_ddns
+    if [[ "$NodeType" != "snell" ]]; then
+        select_ddns
+    fi
 
     ipv6_support=$(check_ipv6_support)
     listen_ip="0.0.0.0"

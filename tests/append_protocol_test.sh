@@ -258,14 +258,14 @@ new_case "$xray_config"
 if ! run_append ";4243;12;"; then
     fail "在 xray 配置上追加 Snell v6 失败"
 fi
-assert_config "Snell v6 应自动添加 sing 核心并跳过证书及 DDNS" '
+assert_config "Snell v6 应自动添加 sing 核心并使用默认 DNS 证书配置" '
 import json, sys
 d = json.load(open(sys.argv[1]))
 assert [c["Type"] for c in d["Cores"]] == ["xray", "sing"], d["Cores"]
 old, new = d["Nodes"]
 assert new["NodeID"] == 4243 and new["NodeType"] == "snell" and new["Core"] == "sing", new
 assert new["ApiHost"] == old["ApiHost"] and new["ApiKey"] == old["ApiKey"]
-assert new["CertConfig"] == {"CertMode": "none"} and "DDNSConfig" not in new, new
+assert new["CertConfig"]["CertMode"] == "dns" and new["CertConfig"]["DNSEnv"] == {"CF_DNS_API_TOKEN": ""} and "DDNSConfig" not in new, new
 assert "ShadowTLSOptions" not in new, new
 '
 
@@ -280,7 +280,7 @@ assert [c["Type"] for c in d["Cores"]] == ["sing"], d["Cores"]
 old, new = d["Nodes"]
 assert new["NodeID"] == 4243 and new["NodeType"] == "snell", new
 assert new["ApiHost"] == old["ApiHost"] and new["ApiKey"] == old["ApiKey"]
-assert new["CertConfig"] == {"CertMode": "none"}, new
+assert new["CertConfig"]["CertMode"] == "dns" and new["CertConfig"]["DNSEnv"] == {"CF_DNS_API_TOKEN": ""}, new
 '
 
 # --- 3. sing 配置上追加 xray 协议，并补齐配套文件 ---------------------------

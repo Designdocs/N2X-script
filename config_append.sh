@@ -171,7 +171,7 @@ def cert_donor(nodes):
 def inherit_cert(new_node, donor):
     """把现有节点的证书信息补进新节点，返回被继承的字段名。"""
     cert = new_node.get('CertConfig')
-    if not isinstance(cert, dict) or not isinstance(donor, dict):
+    if new_node.get('NodeType') == 'snell' or not isinstance(cert, dict) or not isinstance(donor, dict):
         return []
     if str(cert.get('CertMode') or 'none') == 'none':
         return []

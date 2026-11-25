@@ -47,7 +47,7 @@ matrix=(
     "9|tuic|sing|http|9;;1"
     "10|shadowtls|sing|none|10;"
     "11|naive|sing|http|11;;1"
-    "12|snell|sing|none|12"
+    "12|snell|sing|dns|12"
 )
 
 # Feeds a ';'-separated dialogue to add_node_config.
@@ -108,10 +108,9 @@ print(n["NodeType"], n["Core"], n["CertConfig"]["CertMode"], n["NodeID"], n["Cer
     read -r got_type got_core got_cert got_id got_domain <<<"$result"
 
     # Enter at the domain prompt takes the default; a typed domain is kept;
-    # cert-less protocols keep the legacy placeholder except for Snell.
+    # cert-less protocols keep the legacy placeholder.
     case "$choice:$want_cert" in
         1:* ) want_domain="n1.test.com" ;;
-        12:* ) want_domain="" ;;
         *:none ) want_domain="all.example.com" ;;
         * ) want_domain="all.nom-loc.com" ;;
     esac
@@ -170,7 +169,11 @@ n = json.load(sys.stdin)
 for key in ("ShadowTLSOptions", "NaiveOptions", "ArtXOptions"):
     assert key not in n, key + " leaked into an unrelated protocol"
 if n["NodeType"] == "snell":
-    assert n["CertConfig"] == {"CertMode": "none"}, n
+    assert n["CertConfig"] == {
+        "CertMode": "dns", "CertDomain": "all.nom-loc.com", "RejectUnknownSni": False,
+        "CertFile": "/etc/N2X/fullchain-{domain}.cer", "KeyFile": "/etc/N2X/cert-{domain}.key",
+        "Email": "smusicssr@gmail.com", "Provider": "cloudflare", "DNSEnv": {"CF_DNS_API_TOKEN": ""},
+    }, n
     assert "DDNSConfig" not in n, n
 ' || { echo "FAIL choice ${choice}: protocol option leaked" >&2; failures=$((failures + 1)); }
             ;;

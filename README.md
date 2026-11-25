@@ -132,7 +132,7 @@ DDNS 默认关闭。安装、生成配置和追加节点共用同一套引导：
 
 追加（`config_append.sh`）的具体行为：
 
-- 添加 Snell v6 时，输入面板上的节点 ID 并选择 `12. Snell v6`。脚本自动使用 sing-box 并跳过 TLS、证书域名、申请证书和 DDNS。PSK 与可选的 ShadowTLS 参数沿用面板下发的配置。
+- 添加 Snell v6 时，输入面板上的节点 ID 并选择 `12. Snell v6`。脚本使用 sing-box，默认填入 Cloudflare DNS 证书配置，API Token 留空。直连开启本机网页回落时，填好 Token，确保面板回落域名与证书域名匹配。N2X 会在缺少证书时申请，并每天检查是否需要续签。PSK 与可选的 ShadowTLS 参数沿用面板下发的配置。
 - 只在缺少对应核心时才往 `Cores` 里补一条。新节点走 sing 而配置里只有 xray，就补一条 sing；
   该核心已存在则不动它，已经改过的 `ConnectionConfig`、`NTP` 等参数都保留。
 - `NodeID + 协议 + 核心`三者都相同的节点视为重复，跳过并提示，不会写进去。同一个 NodeID
