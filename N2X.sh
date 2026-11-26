@@ -1513,6 +1513,7 @@ generate_config_file() {
         "Level": "error",
         "Output": ""
     },
+    "WSScanGuard": {"Enabled": false, "LogMaxMB": 10},
     "Cores": $cores_config,
     "Nodes": [$formatted_nodes_config],
     "_help": {
@@ -1632,6 +1633,29 @@ show_usage() {
     echo "------------------------------------------"
 }
 
+ws_scan_menu() {
+    local cfg="${N2X_CONFIG_DIR:-/etc/N2X}/config.json"
+    local state="${N2X_WS_SCAN_STATE_DIR:-/var/lib/N2X/ws-scan}" current choice action
+    while true; do
+        current="$(n2x_config_py ws-setting "$cfg" status)" || return 1
+        printf '\n节点扫描防护（配置%s）\n1. 开启防护\n2. 关闭防护\n3. 查看拦截日志\n0. 返回\n' "$current"
+        read -rp "请选择 [0-3]: " choice || return
+        case "$choice" in
+            1|2)
+                if [[ "$choice" == 1 ]]; then action=on; else action=off; fi
+                if n2x_config_py ws-setting "$cfg" "$action"; then config_apply_saved "$cfg"; fi
+                ;;
+            3) if [[ -t 1 ]] && command -v less >/dev/null; then
+                   n2x_config_py ws-logs "$state" | less -FX
+               else
+                   n2x_config_py ws-logs "$state"
+               fi ;;
+            0) show_menu; return ;;
+            *) echo "请输入 0 到 3" ;;
+        esac
+    done
+}
+
 show_menu() {
     echo -e "
   ${green}N2X 后端管理脚本，${plain}${red}不适用于docker${plain}
@@ -1664,6 +1688,7 @@ show_menu() {
   ${green}19.${plain} Caddy 443 分流管理
   ${green}20.${plain} 下载拦截管理（BT/P2P 启停）
   ${green}21.${plain} 出口解锁设置（自定义 http/socks 分流）
+  ${green}25.${plain} 节点扫描防护
 ———— ${yellow}检查与清理${plain} ————
   ${green}22.${plain} 检查配置文件（不启动服务）
   ${green}23.${plain} 删除节点（按 NodeID 删除整段配置）
@@ -1672,7 +1697,7 @@ show_menu() {
  "
  #后续更新可加入上方字符串中
     show_status
-    echo && read -rp "请输入选择 [0-24]: " num
+    echo && read -rp "请输入选择 [0-25]: " num
 
     case "${num}" in
         0) config ;;
@@ -1700,7 +1725,8 @@ show_menu() {
         22) check_install && check_config_file ;;
         23) delete_node_config ;;
         24) exit ;;
-        *) echo -e "${red}请输入正确的数字 [0-24]${plain}" ;;
+        25) check_install && ws_scan_menu ;;
+        *) echo -e "${red}请输入正确的数字 [0-25]${plain}" ;;
     esac
 }
 

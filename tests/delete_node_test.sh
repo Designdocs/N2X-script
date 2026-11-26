@@ -18,7 +18,7 @@ manager = (repo / 'N2X.sh').read_text()
 wrapper = re.search(r'^delete_node_config\(\) \{\n.*?^\}\n', manager, re.M | re.S).group(0)
 assert '23.${plain} 删除节点' in manager
 assert '23) delete_node_config ;;' in manager
-assert '24) exit ;;' in manager and '[0-24]' in manager
+assert '24) exit ;;' in manager and '[0-25]' in manager
 assert '"delnode"|"delete_node") delete_node_config 0 ;;' in manager
 assert 'N2X delnode' in manager
 

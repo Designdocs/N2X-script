@@ -48,7 +48,9 @@ n2x_config_py() {
     py="$(n2x_python_bin)" || return 127
     "$py" - "$@" <<'PY'
 import io
+import os
 import json
+import tempfile
 import sys
 
 
@@ -376,9 +378,94 @@ def do_merge(config_path, nodes_path, cores_path, out_path):
         print('  使用 HTTP 或 DNS 自动申请证书的节点，请确认域名解析与 API 参数。')
 
 
+def ws_setting(path, action):
+    with io.open(path, encoding="utf8", newline="") as f:
+        raw = f.read()
+    clean = trim_json5(raw)
+    doc = json.loads(clean)
+    settings = doc.get("WSScanGuard", {})
+    enabled = settings.get("Enabled", False)
+    if type(enabled) is not bool:
+        raise ValueError("WSScanGuard.Enabled 需要填写 true 或 false")
+    if action == "status":
+        print("已开启" if enabled else "已关闭")
+        return
+    value = action == "on"
+    if enabled == value:
+        return
+    # Traverse object keys using offsets into the comment-masked source;
+    # replace only the boolean (or insert the missing member).
+    decoder = json.JSONDecoder()
+    def skip(pos):
+        while pos < len(clean) and clean[pos].isspace():
+            pos += 1
+        return pos
+    def member(start, name):
+        pos = skip(start + 1)
+        while clean[pos] != "}":
+            key, pos = decoder.raw_decode(clean, pos)
+            pos = skip(skip(pos) + 1)
+            _, end = decoder.raw_decode(clean, pos)
+            if key == name:
+                return pos, end
+            pos = skip(end)
+            if clean[pos] == "}":
+                break
+            pos = skip(pos + 1)
+        return None
+    root = skip(0)
+    obj = member(root, "WSScanGuard")
+    flag = member(obj[0], "Enabled") if obj else None
+    if flag:
+        start, end = flag
+        insert = json.dumps(value)
+    else:
+        parent = obj[0] if obj else root
+        start = end = parent + 1
+        insert = '"Enabled": ' + json.dumps(value) if obj else '"WSScanGuard": {"Enabled": ' + json.dumps(value) + '}'
+        insert = '\n  ' + insert + (',' if clean[skip(start)] != '}' else '')
+    output = raw[:start] + insert + raw[end:]
+    json.loads(trim_json5(output))
+    path = os.path.realpath(path)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path))
+    try:
+        with os.fdopen(fd, "wb") as f:
+            original = os.stat(path)
+            os.fchmod(f.fileno(), original.st_mode & 0o777)
+            if os.geteuid() == 0:
+                os.fchown(f.fileno(), original.st_uid, original.st_gid)
+            f.write(output.encode("utf8"))
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+def ws_logs(root):
+    found = False
+    for name in ("intercepts.jsonl.1", "intercepts.jsonl"):
+        try:
+            f = io.open(os.path.join(root, name), encoding="utf8")
+        except FileNotFoundError:
+            continue
+        with f:
+            for line in f:
+                e = json.loads(line)
+                print("{}  节点 {}  路径 {}  规则 {}".format(e["time"], json.dumps(e["node"]), json.dumps(e["path"]), e["rule"]))
+                found = True
+    if not found:
+        print("暂无拦截日志")
+
+
 mode = sys.argv[1] if len(sys.argv) > 1 else ''
 try:
-    if mode == 'facts':
+    if mode == 'ws-setting':
+        ws_setting(sys.argv[2], sys.argv[3])
+    elif mode == 'ws-logs':
+        ws_logs(sys.argv[2])
+    elif mode == 'facts':
         do_facts(sys.argv[2])
     elif mode == 'merge':
         do_merge(sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5])
