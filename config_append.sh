@@ -391,10 +391,19 @@ def ws_setting(path, action):
         print("已开启" if enabled else "已关闭")
         return
     value = action == "on"
-    if enabled == value:
+    updates = {}
+    if enabled != value:
+        updates["Enabled"] = value
+    ca = settings.get("RelayCAFile")
+    if value and ca in (None, ""):
+        updates["RelayCAFile"] = "builtin"
+    elif not value and ca == "builtin":
+        if "Enabled" not in settings:
+            updates["Enabled"] = False
+        updates["RelayCAFile"] = None
+    if not updates:
         return
-    # Traverse object keys using offsets into the comment-masked source;
-    # replace only the boolean (or insert the missing member).
+    # Offsets in the masked text also address the original JSON with comments.
     decoder = json.JSONDecoder()
     def skip(pos):
         while pos < len(clean) and clean[pos].isspace():
@@ -403,11 +412,12 @@ def ws_setting(path, action):
     def member(start, name):
         pos = skip(start + 1)
         while clean[pos] != "}":
+            key_start = pos
             key, pos = decoder.raw_decode(clean, pos)
             pos = skip(skip(pos) + 1)
             _, end = decoder.raw_decode(clean, pos)
             if key == name:
-                return pos, end
+                return key_start, pos, end
             pos = skip(end)
             if clean[pos] == "}":
                 break
@@ -415,16 +425,33 @@ def ws_setting(path, action):
         return None
     root = skip(0)
     obj = member(root, "WSScanGuard")
-    flag = member(obj[0], "Enabled") if obj else None
-    if flag:
-        start, end = flag
-        insert = json.dumps(value)
+    output = raw
+    if obj:
+        parent = obj[1]
+        for name, setting in updates.items():
+            clean = trim_json5(output)
+            field = member(parent, name)
+            if setting is None:
+                start, _, end = field
+                # Remove only the field and its separator; keep adjacent comments.
+                after = skip(end)
+                before = start - 1
+                while clean[before].isspace():
+                    before -= 1
+                comma = after if clean[after] == "," else before
+                output = output[:comma] + " " + output[comma + 1:]
+                output = output[:start] + output[end:]
+            elif field:
+                _, start, end = field
+                output = output[:start] + json.dumps(setting) + output[end:]
+            else:
+                pos = parent + 1
+                item = json.dumps(name) + ": " + json.dumps(setting)
+                output = output[:pos] + "\n  " + item + ("," if clean[skip(pos)] != "}" else "") + output[pos:]
     else:
-        parent = obj[0] if obj else root
-        start = end = parent + 1
-        insert = '"Enabled": ' + json.dumps(value) if obj else '"WSScanGuard": {"Enabled": ' + json.dumps(value) + '}'
-        insert = '\n  ' + insert + (',' if clean[skip(start)] != '}' else '')
-    output = raw[:start] + insert + raw[end:]
+        pos = root + 1
+        item = '"WSScanGuard": ' + json.dumps(updates)
+        output = raw[:pos] + "\n  " + item + ("," if clean[skip(pos)] != "}" else "") + raw[pos:]
     json.loads(trim_json5(output))
     path = os.path.realpath(path)
     fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path))

@@ -36,4 +36,28 @@ grep -Fq '${N2X_API_HOST}' "$work/config.json"
 echo '{"Cores":[]}' >"$work/config.json"
 n2x_config_py ws-setting "$work/config.json" on
 test "$(n2x_config_py ws-setting "$work/config.json" status)" = '已开启'
+grep -Fq '"RelayCAFile": "builtin"' "$work/config.json"
+n2x_config_py ws-setting "$work/config.json" off
+! grep -q RelayCAFile "$work/config.json" || exit 1
+
+for ca in '' builtin /etc/N2X/custom-ca.pem; do
+    printf '{"WSScanGuard":{"Enabled":true,"DirectOnlyNodes":["direct-a"],"FeedbackCertFile":"cert","FeedbackKeyFile":"key","RelayCAFile":"%s"}}' "$ca" >"$work/config.json"
+    for action in on on off off; do
+        n2x_config_py ws-setting "$work/config.json" "$action"
+        python3 - "$work/config.json" "$action" "$ca" <<'CHECK'
+import json, sys
+with open(sys.argv[1]) as f:
+    actual = json.load(f)["WSScanGuard"]
+on = sys.argv[2] == "on"
+expected = dict(Enabled=on, DirectOnlyNodes=["direct-a"], FeedbackCertFile="cert", FeedbackKeyFile="key")
+if on or sys.argv[3] not in ("", "builtin"):
+    expected["RelayCAFile"] = sys.argv[3] or "builtin"
+assert actual == expected, actual
+CHECK
+    done
+done
+echo '{"WSScanGuard":{"RelayCAFile":"builtin", /* keep */ }}' >"$work/config.json"
+n2x_config_py ws-setting "$work/config.json" off
+test "$(n2x_config_py ws-setting "$work/config.json" status)" = '已关闭'
+grep -Fq '/* keep */' "$work/config.json"
 echo 'WS menu OK'
