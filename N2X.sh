@@ -1638,20 +1638,22 @@ ws_scan_menu() {
     local state="${N2X_WS_SCAN_STATE_DIR:-/var/lib/N2X/ws-scan}" current choice action
     while true; do
         current="$(n2x_config_py ws-setting "$cfg" status)" || return 1
-        printf '\n节点扫描防护（配置%s）\n1. 开启防护\n2. 关闭防护\n3. 查看拦截日志\n0. 返回\n' "$current"
-        read -rp "请选择 [0-3]: " choice || return
+        printf '\n节点扫描防护（配置%s）\n1. 开启防护\n2. 关闭防护\n3. 查看拦截日志\n4. 查看已封禁 IP\n0. 返回\n' "$current"
+        read -rp "请选择 [0-4]: " choice || return
         case "$choice" in
             1|2)
                 if [[ "$choice" == 1 ]]; then action=on; else action=off; fi
                 if n2x_config_py ws-setting "$cfg" "$action"; then config_apply_saved "$cfg"; fi
                 ;;
-            3) if [[ -t 1 ]] && command -v less >/dev/null; then
-                   n2x_config_py ws-logs "$state" | less -FX
+            3|4) action=ws-logs
+               if [[ "$choice" == 4 ]]; then action=ws-bans; fi
+               if [[ -t 1 ]] && command -v less >/dev/null; then
+                   n2x_config_py "$action" "$state" | less -FX
                else
-                   n2x_config_py ws-logs "$state"
+                   n2x_config_py "$action" "$state"
                fi ;;
             0) show_menu; return ;;
-            *) echo "请输入 0 到 3" ;;
+            *) echo "请输入 0 到 4" ;;
         esac
     done
 }

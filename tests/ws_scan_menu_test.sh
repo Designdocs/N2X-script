@@ -17,14 +17,18 @@ cat >"$work/config.json" <<'JSON'
 JSON
 mkdir -p "$work/state"
 echo '{"node":"node-two","rule":"environment","time":"2026-01-02T02:00:00Z","path":"/.env"}' >"$work/state/intercepts.jsonl"
+mkdir -p "$work/state/bans/test"
+echo '{"time":"2026-01-02T03:00:00Z","node":"node-two","visitor":"192.0.2.7"}' >"$work/state/bans/test/192.0.2.7"
+echo '{"node":"node-two","rule":"wordpress","time":"2026-01-02T03:00:00Z","path":"/wp-admin","visitor":"192.0.2.7","action":"node-ban"}' >>"$work/state/intercepts.jsonl"
 ws_scan_menu >"$work/result" <<'CHOICES'
 1
 3
+4
 2
 0
 CHOICES
 test "$(cat "$work/applied")" = "$(printf '已开启\n已关闭')"
-for text in 'node-two' '/.env' 'environment' '2026-01-02T02:00:00Z'; do
+for text in 'node-two' '/.env' 'environment' '已永久封禁此节点' '访客 192.0.2.7' '2026-01-02T02:00:00Z'; do
     grep -Fq "$text" "$work/result"
 done
 grep -Fq '"LogMaxMB": 8, }, /* untouched */' "$work/config.json"

@@ -453,7 +453,10 @@ def ws_logs(root):
         with f:
             for line in f:
                 e = json.loads(line)
-                print("{}  节点 {}  路径 {}  规则 {}".format(e["time"], json.dumps(e["node"]), json.dumps(e["path"]), e["rule"]))
+                details = ("  访客 " + e["visitor"]) if e.get("visitor") else ""
+                if e.get("action") == "node-ban":
+                    details += "  已永久封禁此节点"
+                print(("{}  节点 {}  路径 {}  规则 {}" + details).format(e["time"], json.dumps(e["node"]), json.dumps(e["path"]), e["rule"]))
                 found = True
     if not found:
         print("暂无拦截日志")
@@ -463,6 +466,15 @@ mode = sys.argv[1] if len(sys.argv) > 1 else ''
 try:
     if mode == 'ws-setting':
         ws_setting(sys.argv[2], sys.argv[3])
+    elif mode == 'ws-bans':
+        import glob
+        files = sorted(glob.glob(os.path.join(sys.argv[2], "bans", "*", "*")))
+        if not files:
+            print("暂无已封禁 IP")
+        for filename in files:
+            with io.open(filename, encoding="utf8") as f:
+                item = json.load(f)
+            print("{}  节点 {}  访客 {}".format(item["time"], json.dumps(item["node"]), item["visitor"]))
     elif mode == 'ws-logs':
         ws_logs(sys.argv[2])
     elif mode == 'facts':
