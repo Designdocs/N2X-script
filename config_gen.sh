@@ -93,6 +93,49 @@ read_cert_domain() {
     certdomain="${certdomain:-$default_domain}"
 }
 
+# 输出给 CertConfig 的三个字段。凭据通过标准输入传给 JSON 编码器。
+read_dns_certificate() {
+    local email provider key value reuse
+    local -a keys values
+    if [[ -n "${existing_dns_provider:-}" ]]; then
+        read -rp "沿用已有 DNS 证书邮箱和凭据？[Y/n] " reuse || return 1
+        case "$reuse" in
+            ''|y|Y|yes|YES) cert_dns_provider="$existing_dns_provider"; cert_env_json="{}"; return 0 ;;
+        esac
+    fi
+    if ! command -v python3 >/dev/null; then
+        echo "填写 DNS 证书参数需要 python3。" >&2
+        return 1
+    fi
+    read -rp "证书邮箱 [smusicssr@gmail.com]：" email || return 1
+    email="${email:-smusicssr@gmail.com}"
+    while true; do
+        read -rp "DNS 服务商（1. cloudflare  2. alidns）[cloudflare]：" provider || return 1
+        case "$provider" in
+            ''|1|cloudflare) provider=cloudflare; keys=(CF_DNS_API_TOKEN); break ;;
+            2|alidns) provider=alidns; keys=(ALICLOUD_ACCESS_KEY ALICLOUD_SECRET_KEY); break ;;
+            *) echo "请选择 cloudflare 或 alidns。" >&2 ;;
+        esac
+    done
+    values=()
+    for key in "${keys[@]}"; do
+        while true; do
+            IFS= read -rsp "${key}（输入隐藏）：" value || return 1
+            if [[ -t 0 ]]; then printf '\n' >&2; fi
+            [[ -n "$value" ]] && break
+            echo "$key 不能为空。" >&2
+        done
+        values+=("$key" "$value")
+    done
+    cert_dns_provider="$provider"
+    cert_email_json=$(printf '%s' "$email" | python3 -c 'import json, sys; print(json.dumps(sys.stdin.read()))') || return 1
+    cert_env_json=$(printf '%s\0' "${values[@]}" | python3 -c '
+import json, sys
+parts = sys.stdin.buffer.read().decode().split("\0")[:-1]
+print(json.dumps(dict(zip(parts[::2], parts[1::2]))))
+')
+}
+
 # 证书模式选择。设置：certmode / certdomain
 select_cert_mode() {
     certmode="none"
@@ -126,10 +169,10 @@ select_cert_mode() {
         read -rp "请输入：" certmode
         case "$certmode" in
             1 ) certmode="http" ;;
-            2 ) certmode="dns" ;;
+            2|dns ) certmode="dns"; read_dns_certificate || return 1 ;;
             3 ) certmode="self" ;;
         esac
-        if [ "$certmode" != "http" ]; then
+        if [ "$certmode" = "self" ]; then
             echo -e "${red}请手动修改配置文件后重启N2X！${plain}"
         fi
     fi
@@ -158,7 +201,9 @@ select_ddns() {
     case "$provider_choice" in
         2)
             ddns_provider="alidns"
-            ddns_env='{"ALICLOUD_ACCESS_KEY":"ExampleAccessKey","ALICLOUD_SECRET_KEY":"ExampleSecretKey"}'
+            if [[ "$certmode" != dns || "$cert_dns_provider" != alidns ]]; then
+                ddns_env='{"ALICLOUD_ACCESS_KEY":"ExampleAccessKey","ALICLOUD_SECRET_KEY":"ExampleSecretKey"}'
+            fi
             ;;
         ""|1) ;;
         *)
@@ -168,7 +213,7 @@ select_ddns() {
     esac
     if [[ "$ddns_enabled" == true ]]; then
         echo -e "${yellow}DDNS 默认更新 A 记录，每 300 秒检查一次。请检查 DDNSConfig 的域名与凭据后重启；AAAA 记录可手动设置 RecordType。${plain}"
-        if [[ "$ddns_provider" == cloudflare ]]; then
+        if [[ "$ddns_provider" == cloudflare && "$cert_dns_provider" == cloudflare ]]; then
             echo "Cloudflare 默认复用 CertConfig.DNSEnv.CF_DNS_API_TOKEN，也可在 DDNSConfig.DNSEnv 中单独填写。"
         fi
     fi
@@ -262,12 +307,10 @@ node_extra_options() {
 }
 
 node_certificate_options() {
-    local email="example@gmail.com" token="ExampleTOKEN"
     if [[ "$NodeType" == "snell" ]]; then
-        email="smusicssr@gmail.com"
-        token=""
+        cert_email_json='"smusicssr@gmail.com"'
+        cert_env_json='{"CF_DNS_API_TOKEN":""}'
     fi
-
     cat <<EOF
             "CertConfig": {
                 "CertMode": "$certmode",
@@ -275,11 +318,9 @@ node_certificate_options() {
                 "CertDomain": "$certdomain",
                 "CertFile": "/etc/N2X/fullchain-{domain}.cer",
                 "KeyFile": "/etc/N2X/cert-{domain}.key",
-                "Email": "$email",
-                "Provider": "cloudflare",
-                "DNSEnv": {
-                    "CF_DNS_API_TOKEN": "$token"
-                }
+                "Email": $cert_email_json,
+                "Provider": "$cert_dns_provider",
+                "DNSEnv": $cert_env_json
 EOF
     if [[ "$NodeType" == "snell" ]]; then
         echo '            }'
@@ -304,6 +345,8 @@ EOF
 # 节点配置生成。追加时可在首次选中 xray 后询问其 DNS 选项。
 add_node_config() {
     local ask_xray_dns="${1:-false}" dns_answer
+    local cert_dns_provider=cloudflare cert_email_json='"example@gmail.com"'
+    local cert_env_json='{"CF_DNS_API_TOKEN":"ExampleTOKEN"}'
     core="xray"
     while true; do
         read -rp "请输入节点Node ID：" NodeID
@@ -324,7 +367,7 @@ add_node_config() {
             custom_dns_enabled=false
         fi
     fi
-    select_cert_mode
+    select_cert_mode || return 1
     if [[ "$NodeType" != "snell" ]]; then
         select_ddns
     fi

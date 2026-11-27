@@ -30,9 +30,9 @@ n2x_python_bin() {
 # 唯一的 python 入口：
 #
 #   facts <config.json>
-#       固定输出 8 行（是否需要清理注释 / 是否已有 xray / 是否已有 sing /
+#       固定输出 9 行（是否需要清理注释 / 是否已有 xray / 是否已有 sing /
 #       xray 是否配了 DnsConfigPath / 节点数 / ApiHost / ApiKey / 可继承的证书
-#       域名，没有则为空），其后是给人看的节点清单。
+#       域名 / 可沿用的 DNS 服务商，没有则为空），其后是给人看的节点清单。
 #
 #   merge <config.json> <nodes.json> <cores.json> <out.json>
 #       把 nodes.json 追加进 Nodes、把 cores.json 里缺失的核心追加进 Cores，
@@ -170,16 +170,35 @@ def cert_donor(nodes):
     return donor if donor is not None else fallback
 
 
+def reusable_dns_provider(cert):
+    if not cert or cert.get('CertMode') != 'dns':
+        return ''
+    env = cert.get('DNSEnv')
+    if isinstance(env, dict) and any(env.values()) and env not in DNSENV_PLACEHOLDERS:
+        return one_line(cert.get('Provider'))
+    return ''
+
+
 def inherit_cert(new_node, donor):
     """把现有节点的证书信息补进新节点，返回被继承的字段名。"""
     cert = new_node.get('CertConfig')
-    if new_node.get('NodeType') == 'snell' or not isinstance(cert, dict) or not isinstance(donor, dict):
+    if new_node.get('NodeType') == 'snell' or not isinstance(cert, dict):
         return []
     if str(cert.get('CertMode') or 'none') == 'none':
         return []
 
+    dns_configured = cert.get("CertMode") == "dns"
     inherited = []
+    if dns_configured and cert.get('DNSEnv') == {}:
+        if not donor or reusable_dns_provider(donor) != cert['Provider']:
+            raise ValueError('原节点的 DNS 凭据已更改，请重新追加节点')
+        cert.update(Email=donor.get('Email') or 'smusicssr@gmail.com', DNSEnv=dict(donor['DNSEnv']))
+        inherited.extend(('Email', 'Provider', 'DNSEnv'))
+    if not isinstance(donor, dict):
+        return inherited
     for field, placeholders in CERT_PLACEHOLDERS.items():
+        if dns_configured and field in ('Email', 'Provider'):
+            continue
         if field in ('CertFile', 'KeyFile') and 'CertDomain' not in inherited \
                 and cert.get('CertDomain') != donor.get('CertDomain'):
             # 证书路径通常带着域名，域名和现有节点不同就别继承路径，否则指到别的域名上。
@@ -195,7 +214,7 @@ def inherit_cert(new_node, donor):
         inherited.append(field)
 
     donor_env = donor.get('DNSEnv')
-    if isinstance(donor_env, dict) and donor_env and donor_env not in DNSENV_PLACEHOLDERS:
+    if not dns_configured and isinstance(donor_env, dict) and donor_env and donor_env not in DNSENV_PLACEHOLDERS:
         if cert.get('DNSEnv') in (None, {}) + DNSENV_PLACEHOLDERS:
             cert['DNSEnv'] = dict(donor_env)
             inherited.append('DNSEnv')
@@ -241,6 +260,7 @@ def do_facts(path):
         host,
         key,
         donor_domain,
+        reusable_dns_provider(donor),
     ]
     for node in nodes:
         cert = node.get('CertConfig')
@@ -603,7 +623,7 @@ select_append_api_info() {
 # 服务），无改动或失败返回非 0。
 append_node_configs() {
     local cfg_dir cfg facts trimmed has_xray has_sing existing_dns node_count
-    local existing_host existing_key existing_domain node_table answer tmp_dir nodes_str core_list
+    local existing_host existing_key existing_domain existing_dns_provider node_table answer tmp_dir nodes_str core_list
     local add_xray=false add_sing=false saved_xray saved_sing new_cores merge_status ask_xray_dns
 
     cfg_dir="$(n2x_config_dir)"
@@ -636,6 +656,7 @@ append_node_configs() {
         IFS= read -r existing_host
         IFS= read -r existing_key
         IFS= read -r existing_domain
+        IFS= read -r existing_dns_provider
         node_table="$(cat)"
     } <<EOF
 $facts
@@ -685,7 +706,7 @@ EOF
         if [[ "$has_xray" != "true" && "$core_xray" != "true" ]]; then
             ask_xray_dns=true
         fi
-        add_node_config "$ask_xray_dns"
+        add_node_config "$ask_xray_dns" || return 1
         read -rp "是否继续添加节点配置？(y继续，回车或n退出)" answer
         if [[ ! "$answer" =~ ^[Yy]([Ee][Ss])?$ ]]; then
             break

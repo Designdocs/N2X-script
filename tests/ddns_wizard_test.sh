@@ -13,7 +13,7 @@ check_ipv6_support() { echo 0; }
 
 # Capture prompts even with redirected stdin (bash otherwise hides read -p).
 read() {
-    if [[ "${1:-}" == "-rp" ]]; then
+    if [[ "${1:-}" == "-rp" || "${1:-}" == "-rsp" ]]; then
         printf '%s\n' "$2" >> "$work_dir/prompts"
     fi
     builtin read "$@"
@@ -47,7 +47,19 @@ assert prompts.count("是否开启 DDNS") == int(expected_prompts), label
 if int(expected_prompts):
     assert prompts.index("是否开启 DDNS") > prompts.rfind("请输入："), label
     assert prompts.index("是否开启 DDNS") > prompts.index("请输入证书域名"), label
-if enabled == "true" and provider == "alidns":
+cert = node["CertConfig"]
+if cert["CertMode"] == "dns":
+    if label == "alidns_cert":
+        assert cert["Email"] == "ops@test.example" and cert["Provider"] == "alidns"
+        assert cert["DNSEnv"] == {"ALICLOUD_ACCESS_KEY": "key", "ALICLOUD_SECRET_KEY": r'secr"et\key'}
+        assert ddns["DNSEnv"] == {}
+    else:
+        assert cert["Email"] == "smusicssr@gmail.com" and cert["Provider"] == "cloudflare"
+        assert cert["DNSEnv"] == {"CF_DNS_API_TOKEN": "token"}
+    assert prompts.index("证书邮箱") < prompts.index("DNS 服务商（") < prompts.index("输入隐藏") < prompts.index("是否开启 DDNS")
+else:
+    assert "证书邮箱" not in prompts and "输入隐藏" not in prompts
+if enabled == "true" and provider == "alidns" and label != "alidns_cert":
     assert set(ddns["DNSEnv"]) == {"ALICLOUD_ACCESS_KEY", "ALICLOUD_SECRET_KEY"}, label
 elif enabled == "true":
     assert ddns["DNSEnv"] == {}, "Cloudflare should reuse matching certificate credentials"
@@ -55,9 +67,10 @@ PY
 }
 
 run_case default_off '100;8;edge.example.com;1;;END' false cloudflare 1
-run_case explicit_no '100;8;edge.example.com;2;n;END' false cloudflare 1
-run_case cloudflare '100;8;edge.example.com;2;y;1;END' true cloudflare 1
-run_case alibaba_international '100;8;edge.example.com;2;yes;2;END' true alidns 1
+run_case explicit_no '100;8;edge.example.com;2;;;token;n;END' false cloudflare 1
+run_case cloudflare '100;8;edge.example.com;2;;;token;y;1;END' true cloudflare 1
+run_case alibaba_international '100;8;edge.example.com;2;;;token;yes;2;END' true alidns 1
+run_case alidns_cert '100;5;edge.example.com;2;ops@test.example;alidns;key;secr"et\key;y;2;END' true alidns 1
 run_case self_certificate '100;8;edge.example.com;3;n;END' false cloudflare 1
 # These cases follow enabled cases to detect an enable-state leak across nodes.
 run_case no_certificate '100;1;n;END' false cloudflare 0

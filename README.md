@@ -65,9 +65,11 @@ migrate_freedom_domain_strategy /实际路径/custom_outbound.json
 采用临时文件原子替换。重复升级无变化时不写文件、不新增备份；解析、重复键、并发修改
 或写入失败时保留原配置并显示原因。无需重新生成节点配置。
 
-## Cloudflare DNS 证书
+## DNS 证书
 
-Cloudflare 的 DNS 证书配置使用 `DNSEnv.CF_DNS_API_TOKEN`。生成的 `ExampleTOKEN` 需要替换为实际 API Token，权限仅授予所需域名的 `Zone / DNS / Edit` 和 `Zone / Zone / Read`，区域资源选择 `Include / Specific zone`。可参考 [Cloudflare 创建说明](https://developers.cloudflare.com/fundamentals/api/get-started/create-token/)和 [lego 配置说明](https://go-acme.github.io/lego/dns/cloudflare/)。指定 Zone 的权限覆盖其中所有 DNS 记录。
+向导选择 DNS 证书后，邮箱默认 `smusicssr@gmail.com`，服务商默认 `cloudflare`。Cloudflare 填写 `CF_DNS_API_TOKEN`，阿里云（`alidns`）填写 `ALICLOUD_ACCESS_KEY` 和 `ALICLOUD_SECRET_KEY`。追加节点时可选择沿用已有 DNS 证书邮箱和凭据。
+
+Cloudflare Token 的权限仅授予所需域名的 `Zone / DNS / Edit` 和 `Zone / Zone / Read`，区域资源选择 `Include / Specific zone`。可参考 [Cloudflare 创建说明](https://developers.cloudflare.com/fundamentals/api/get-started/create-token/)和 [lego 配置说明](https://go-acme.github.io/lego/dns/cloudflare/)。指定 Zone 的权限覆盖其中所有 DNS 记录。
 
 如需通过 `/etc/N2X/.env` 管理 Token，加入 `CF_DNS_API_TOKEN=你的Token`，并将节点的 `DNSEnv` 写为 `{"CF_DNS_API_TOKEN": "${CF_DNS_API_TOKEN}"}`。`Email` 仍是证书账户邮箱，Token 不需要 Cloudflare 邮箱。迁移时应替换旧的 `DNSEnv`，并清理 `.env`、systemd 或容器环境中的旧 `CF_API_KEY`、`CLOUDFLARE_API_KEY`、`CF_API_EMAIL`、`CLOUDFLARE_EMAIL`；脚本保留旧配置渲染兼容性，但不再引导填写全局 Key。
 

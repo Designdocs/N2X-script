@@ -398,7 +398,7 @@ cert["DNSEnv"] = json.loads(sys.argv[1])
 print(json.dumps(data))
 ' "$dns_env")"
     new_case "$cloudflare_config"
-    if ! run_append ";4242;8;;2;n;"; then
+    if ! run_append ";4242;8;;2;;n;"; then
         fail "追加 Cloudflare DNS 节点失败"
     fi
     assert_config "追加节点未保留 Cloudflare DNS 凭据" '
@@ -410,6 +410,17 @@ assert new["CertConfig"]["Provider"] == "cloudflare"
 assert new["CertConfig"]["DNSEnv"] == old["CertConfig"]["DNSEnv"], "DNS credentials changed"
 '
 done
+
+new_case "$xray_config"
+if ! run_append ";4242;8;;2;n;;;new-token;n;"; then
+    fail "追加节点时切换 DNS 服务商失败"
+fi
+assert_config "旧凭据覆盖了新节点的 Cloudflare 选择" '
+import json, sys
+cert = json.load(open(sys.argv[1]))["Nodes"][-1]["CertConfig"]
+assert cert["Provider"] == "cloudflare" and cert["Email"] == "smusicssr@gmail.com"
+assert cert["DNSEnv"] == {"CF_DNS_API_TOKEN": "new-token"}
+'
 
 if (( failures > 0 )); then
     echo "${failures} append-protocol check(s) failed" >&2

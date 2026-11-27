@@ -1480,7 +1480,7 @@ generate_config_file() {
             first_node=false
             api_host_val="$ApiHost"
             api_key_val="$ApiKey"
-            add_node_config
+            add_node_config || return 1
         else
             read -rp "是否继续添加节点配置？(y继续，回车或n退出)" continue_adding_node
             if [[ ! "$continue_adding_node" =~ ^[Yy]([Ee][Ss])?$ ]]; then
@@ -1491,7 +1491,7 @@ generate_config_file() {
             fi
             api_host_val="$ApiHost"
             api_key_val="$ApiKey"
-            add_node_config
+            add_node_config || return 1
         fi
     done
 
@@ -1507,7 +1507,7 @@ generate_config_file() {
     formatted_nodes_config="${nodes_config_str%,}"
 
     # 创建 config.json 文件
-    cat <<EOF > /etc/N2X/config.json
+    (umask 077; cat <<EOF > /etc/N2X/config.json
 {
     "Log": {
         "Level": "error",
@@ -1521,6 +1521,7 @@ $(config_help_block)
     }
 }
 EOF
+    ) || return 1
 
     # DnsConfigPath 默认指向 /etc/N2X/dns.json；N2X generate 单独运行时兜底创建。
     if [ "$core_xray" = true ]; then
