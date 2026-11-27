@@ -867,23 +867,23 @@ fi
 
 install_base() {
     if [[ x"${release}" == x"centos" ]]; then
-        yum install epel-release wget curl unzip tar crontabs socat ca-certificates gettext vim -y >/dev/null 2>&1 || die "yum 安装依赖失败"
+        yum install epel-release wget curl unzip tar crontabs socat ca-certificates gettext vim iproute util-linux -y >/dev/null 2>&1 || die "yum 安装依赖失败"
         update-ca-trust force-enable >/dev/null 2>&1 || true
     elif [[ x"${release}" == x"alpine" ]]; then
-        apk add wget curl unzip tar socat ca-certificates gettext vim >/dev/null 2>&1 || die "apk 安装依赖失败"
+        apk add wget curl unzip tar socat ca-certificates gettext vim cmd:ss cmd:flock >/dev/null 2>&1 || die "apk 安装依赖失败"
         update-ca-certificates >/dev/null 2>&1 || true
     elif [[ x"${release}" == x"debian" ]]; then
         run_apt_with_auto_repair "update" update -y || die "apt-get update 失败"
-        run_apt_with_auto_repair "install dependencies" install wget curl unzip tar cron socat ca-certificates gettext-base vim -y || die "apt 安装依赖失败"
+        run_apt_with_auto_repair "install dependencies" install wget curl unzip tar cron socat ca-certificates gettext-base vim iproute2 util-linux -y || die "apt 安装依赖失败"
         update-ca-certificates >/dev/null 2>&1 || true
     elif [[ x"${release}" == x"ubuntu" ]]; then
         run_apt_with_auto_repair "update" update -y || die "apt-get update 失败"
-        run_apt_with_auto_repair "install dependencies" install wget curl unzip tar cron socat gettext-base vim -y || die "apt 安装依赖失败"
+        run_apt_with_auto_repair "install dependencies" install wget curl unzip tar cron socat gettext-base vim iproute2 util-linux -y || die "apt 安装依赖失败"
         run_apt_with_auto_repair "install certificates" install ca-certificates wget -y || true
         update-ca-certificates >/dev/null 2>&1 || true
     elif [[ x"${release}" == x"arch" ]]; then
         pacman -Sy --noconfirm >/dev/null 2>&1 || die "pacman 更新失败"
-        pacman -S --noconfirm --needed wget curl unzip tar cron socat gettext vim >/dev/null 2>&1 || die "pacman 安装依赖失败"
+        pacman -S --noconfirm --needed wget curl unzip tar cron socat gettext vim iproute2 util-linux >/dev/null 2>&1 || die "pacman 安装依赖失败"
         pacman -S --noconfirm --needed ca-certificates wget >/dev/null 2>&1 || true
     fi
 }
@@ -900,6 +900,7 @@ verify_dependencies() {
         require_cmd journalctl
     fi
     require_cmd envsubst
+    require_cmd flock
 }
 
 # 0: running, 1: not running, 2: not installed
@@ -1304,11 +1305,86 @@ stage_scheduled_support() {
     mkdir -p "$directory" || return 1
     for module in N2X.sh config_gen.sh config_append.sh render_config.sh run.sh artx_decoy.sh \
         download_block.sh outbound_unlock.sh geodata.sh; do
-        curl -q --proto '=https' --proto-redir '=https' -fsSL --connect-timeout 10 --max-time 30 \
-            -o "$directory/$module" "$base/$module" \
-            && [[ -s "$directory/$module" ]] \
-            && bash -n "$directory/$module" || return 1
+        if [[ -f "$SCRIPT_DIR/$module" ]]; then
+            cp "$SCRIPT_DIR/$module" "$directory/$module" || return 1
+        else
+            curl -q --proto '=https' --proto-redir '=https' -fsSL --connect-timeout 10 --max-time 30 \
+                -o "$directory/$module" "$base/$module" || return 1
+        fi
+        [[ -s "$directory/$module" ]] && bash -n "$directory/$module" || return 1
     done
+}
+
+# Existing installations use the live service manager, not a process-name match
+# (the independent decoy process uses the same executable).
+upgrade_service_state() {
+    local state code=0
+    if [[ "$release" == alpine ]]; then
+        state="$(rc-service N2X status 2>&1)" || code=$?
+        case "$state" in
+            *"status: started"*) [[ $code == 0 ]] && echo active ;;
+            *"status: stopped"*) echo inactive ;;
+            *"status: crashed"*) echo failed ;;
+            *) return 1 ;;
+        esac
+    else
+        state="$(systemctl show -p ActiveState N2X)" || return 1
+        printf '%s\n' "${state#ActiveState=}"
+    fi
+}
+
+upgrade_listeners() (
+    set -o pipefail
+    export LC_ALL=C
+    local pid="$1" family
+    for family in 4 6; do
+        ss "-$family" -H -lntup 'not autobound' |
+            awk -v pid="$pid" -v family="$family" '$0 ~ ("pid=" pid ",") {print toupper($1) family, $5}' || exit 1
+    done
+)
+
+prepare_running_upgrade() {
+    local candidate="$1" scratch="$2" support="$3"
+    local config=/etc/N2X/config.json instance pid boot ticks
+    instance="$(geodata_service_instance)" || return 1
+    read -r boot pid ticks <<< "$instance"
+    command -v ss >/dev/null || { log_error "校验监听端口需要 ss（iproute2）"; return 1; }
+    upgrade_listeners "$pid" > "$scratch/ports.raw" && LC_ALL=C sort -u "$scratch/ports.raw" > "$scratch/ports" || return 1
+    if [[ "$release" != alpine ]]; then
+        config="$scratch/config.json"
+        OUTPUT_PATH="$config" sh "$support/render_config.sh" || return 1
+    fi
+    # Use the service working directory for relative paths in the configuration.
+    (cd /usr/local/N2X && "$candidate" prepare-upgrade -c "$config" --output "$scratch/data") || return 1
+    [[ -s "$scratch/data" ]] || { log_error "候选版本未生成升级启动数据"; return 1; }
+    if [[ "$release" != alpine ]]; then
+        OUTPUT_PATH="$config" sh "$support/render_config.sh" || return 1
+    fi
+    (cd /usr/local/N2X && "$candidate" prepare-upgrade -c "$config" --verify "$scratch/data") || return 1
+    [[ "$(geodata_service_instance)" == "$instance" ]] || return 1
+    upgrade_listeners "$pid" > "$scratch/ports.raw" && LC_ALL=C sort -u "$scratch/ports.raw" > "$scratch/latest" || return 1
+    cmp -s "$scratch/ports" "$scratch/latest" || { log_error "准备期间节点监听已变化，请重新升级"; return 1; }
+    env_ready_for_start
+}
+
+verify_running_upgrade() {
+    local scratch="$1" instance pid boot ticks ready missing attempt
+    for ((attempt=0; attempt<=60; attempt++)); do
+        missing="$(cat "$scratch/ports")" || return 1
+        if instance="$(geodata_service_instance)"; then
+            read -r boot pid ticks <<< "$instance"
+            if [[ "/proc/$pid/exe" -ef /usr/local/N2X/N2X ]] && upgrade_listeners "$pid" > "$scratch/ports.raw"; then
+                LC_ALL=C sort -u "$scratch/ports.raw" > "$scratch/latest" || return 1
+                missing="$(LC_ALL=C comm -23 "$scratch/ports" "$scratch/latest")" || return 1
+                ready="$(cat "$upgrade_state/ready.started" 2>/dev/null)" || ready=''
+                if [[ "$ready" == "$pid" && -z "$missing" && "$(geodata_service_instance)" == "$instance" ]]; then return 0; fi
+            fi
+        fi
+        ((attempt == 60)) || sleep 5
+    done
+    log_error "新版 N2X 未完成节点启动验收"
+    [[ -z "$missing" ]] || printf '未恢复的端口：\n%s\n' "$missing" >&2
+    return 1
 }
 
 install_N2X() {
@@ -1317,6 +1393,7 @@ install_N2X() {
     local installed_version code SCRIPT_DIR="$SCRIPT_DIR"
 
     staging_root="$(mktemp -d /tmp/n2x-install.XXXXXX)" || die "创建临时目录失败"
+    upgrade_package_dir="$staging_root"
     extracted_dir="${staging_root}/N2X"
     mkdir -p "$extracted_dir" || die "创建解压目录失败"
     cd "$staging_root" || die "切换到临时目录失败"
@@ -1385,10 +1462,32 @@ install_N2X() {
         fi
     fi
 
+    local state=inactive
+    if [[ -x /usr/local/N2X/N2X || -f /etc/systemd/system/N2X.service || -f /etc/init.d/N2X ]]; then
+        state="$(upgrade_service_state)" || die "无法核对当前 N2X 服务状态，暂缓升级。"
+    fi
+    case "$state" in
+        active)
+            if [[ -z "${scheduled_day:-}" ]]; then
+                stage_scheduled_support "$staging_root/support" || die "管理脚本未就绪，旧服务继续运行。"
+                SCRIPT_DIR="$staging_root/support"
+            fi
+            source "$SCRIPT_DIR/geodata.sh" || die "无法加载维护模块。"
+            upgrade_scratch="$(mktemp -d "$upgrade_state/attempt.XXXXXX")" || die "创建升级暂存目录失败。"
+            prepare_running_upgrade "$extracted_dir/N2X" "$upgrade_scratch" "$SCRIPT_DIR" || die "节点启动数据或监听端口未就绪，暂缓升级，旧服务继续运行。"
+            if [[ -n "${scheduled_day:-}" ]] && ! maintenance_apply_window "$scheduled_day"; then
+                log_info "准备期间维护窗口已结束，旧服务继续运行。"
+                return 0
+            fi
+            ;;
+        inactive|failed) ;;
+        *) die "N2X 当前状态为 $state，暂缓升级。" ;;
+    esac
+
     if [[ x"${release}" == x"alpine" ]]; then
-        service N2X stop >/dev/null 2>&1 || true
+        service N2X stop >/dev/null 2>&1 || [[ "$state" != active ]] || die "停止旧服务失败。"
     else
-        systemctl stop N2X >/dev/null 2>&1 || true
+        systemctl stop N2X >/dev/null 2>&1 || [[ "$state" != active ]] || die "停止旧服务失败。"
     fi
 
     swap_installation_dir "$extracted_dir" || {
@@ -1401,7 +1500,7 @@ install_N2X() {
         die "安装管理脚本失败，请检查本地脚本目录或网络连接"
     fi
     rm -rf "$staging_root" >/dev/null 2>&1 || true
-    cleanup_installation_backup
+    [[ "$state" == active ]] || cleanup_installation_backup
 
     cd /usr/local/N2X/ || die "切换到安装目录失败"
     mkdir /etc/N2X/ -p
@@ -1537,22 +1636,26 @@ EOF
         first_install=true
     else
         if env_ready_for_start; then
-            if [[ x"${release}" == x"alpine" ]]; then
-                service N2X start
-            else
-                systemctl start N2X
+            if [[ "$state" == active ]]; then
+                rm -f "$upgrade_state/ready.started"
+                mv "$upgrade_scratch/data" "$upgrade_state/ready" || die "交接启动数据失败。"
             fi
-            sleep 2
-            check_status
-            echo -e ""
-            if [[ $? == 0 ]]; then
-                log_info "N2X 重启成功"
+            if [[ x"${release}" == x"alpine" ]]; then
+                service N2X start 8>&- || die "启动 N2X 失败"
             else
-                log_warn "N2X 可能启动失败，最近日志："
-                journalctl -u N2X -n 80 --no-pager || true
+                systemctl start N2X || die "启动 N2X 失败"
+            fi
+            if [[ "$state" == active ]]; then
+                verify_running_upgrade "$upgrade_scratch" || die "升级验收失败，旧程序保留在 $INSTALL_BACKUP_DIR"
+                cleanup_installation_backup
+                log_info "N2X 升级完成，节点和原监听端口已恢复"
+            else
+                sleep 2
+                if check_status; then log_info "N2X 重启成功"; else log_warn "请查看 N2X 启动日志"; fi
             fi
         else
             echo -e ""
+            [[ "$state" != active ]] || die "启动配置变化，旧程序保留在 $INSTALL_BACKUP_DIR"
             log_warn "因参数未完整，已跳过启动。请创建并填写 /etc/N2X/.env，或在 /etc/N2X/config.json 中填写 ApiHost/ApiKey 后执行：N2X restart"
         fi
         first_install=false
@@ -1618,4 +1721,11 @@ else
     install_base
 fi
 verify_dependencies
+upgrade_state=/run/n2x-upgrade
+upgrade_scratch=''
+upgrade_package_dir=''
+mkdir -p -m 700 "$upgrade_state" || die "创建升级目录失败"
+exec 8>"$upgrade_state/lock"
+flock -n 8 || die "无法获取 N2X 安装锁，请检查 flock 或正在执行的升级任务"
+trap 'if [[ -n "$upgrade_package_dir" ]]; then rm -rf -- "$upgrade_package_dir"; fi; if [[ -n "$upgrade_scratch" ]]; then rm -rf -- "$upgrade_scratch"; rm -f "$upgrade_state/ready" "$upgrade_state/ready.started"; fi' EXIT
 install_N2X "$@"
