@@ -1343,6 +1343,34 @@ upgrade_listeners() (
     done
 )
 
+fetch_upgrade_data() (
+    local candidate="$1" config="$2" scratch="$3" last_error
+    local -a status
+    set -o pipefail
+    umask 077
+    if "$candidate" prepare-upgrade -c "$config" --output "$scratch/data" 2>&1 | tee "$scratch/prepare.log"; then
+        return 0
+    else
+        status=("${PIPESTATUS[@]}")
+    fi
+    [[ "${status[0]}" == 1 && "${status[1]}" == 0 && ! -e "$scratch/data" ]] || return 1
+    last_error="$(tail -n 1 "$scratch/prepare.log")"
+    [[ "$last_error" == *'Execute command failed'* ]] || return 1
+    case "$last_error" in
+        *'get node config:'*|*'get user list:'*|*'get alive list:'*) ;;
+        *) return 1 ;;
+    esac
+    case "$last_error" in
+        *'Client.Timeout'*|*'context deadline exceeded'*|*'i/o timeout'*) ;;
+        *) return 1 ;;
+    esac
+    if [[ -n "${scheduled_day:-}" ]]; then
+        maintenance_apply_window "$scheduled_day" || return 1
+    fi
+    log_warn "面板请求超时，旧服务继续运行；将使用 HTTP/1.1 再准备一次启动数据。"
+    GODEBUG="${GODEBUG:+$GODEBUG,}http2client=0" "$candidate" prepare-upgrade -c "$config" --output "$scratch/data"
+)
+
 prepare_running_upgrade() {
     local candidate="$1" scratch="$2" support="$3"
     local config=/etc/N2X/config.json instance pid boot ticks
@@ -1355,7 +1383,7 @@ prepare_running_upgrade() {
         OUTPUT_PATH="$config" sh "$support/render_config.sh" || return 1
     fi
     # Use the service working directory for relative paths in the configuration.
-    (cd /usr/local/N2X && "$candidate" prepare-upgrade -c "$config" --output "$scratch/data") || return 1
+    (cd /usr/local/N2X && fetch_upgrade_data "$candidate" "$config" "$scratch") || return 1
     [[ -s "$scratch/data" ]] || { log_error "候选版本未生成升级启动数据"; return 1; }
     if [[ "$release" != alpine ]]; then
         OUTPUT_PATH="$config" sh "$support/render_config.sh" || return 1
