@@ -1659,6 +1659,26 @@ ws_scan_menu() {
     done
 }
 
+domain_usage_menu() {
+    local config_dir="${N2X_CONFIG_DIR:-/etc/N2X}" marker state choice
+    marker="$config_dir/domain-usage.disabled"
+    while true; do
+        state=开启
+        if [[ -e "$marker" || -L "$marker" ]]; then state=关闭; fi
+        printf '\n域名统计与汇报（当前设置：%s）\n1. 开启\n2. 关闭\n0. 返回\n' "$state"
+        read -rp "请选择: " choice || return
+        case "$choice" in
+            1) rm -f -- "$marker" || echo "保存设置失败" >&2 ;;
+            2) if [[ ! -e "$marker" && ! -L "$marker" ]]; then
+                   (umask 077; mkdir -p -- "$config_dir" && set -C && : > "$marker") || echo "保存设置失败" >&2
+               fi ;;
+            0) break ;;
+            *) echo "请输入 0 至 2" ;;
+        esac
+    done
+    show_menu
+}
+
 show_menu() {
     echo -e "
   ${green}N2X 后端管理脚本，${plain}${red}不适用于docker${plain}
@@ -1692,6 +1712,7 @@ show_menu() {
   ${green}20.${plain} 下载拦截管理（BT/P2P 启停）
   ${green}21.${plain} 出口解锁设置（自定义 http/socks 分流）
   ${green}25.${plain} 节点扫描防护
+  ${green}26.${plain} 域名统计与汇报
 ———— ${yellow}检查与清理${plain} ————
   ${green}22.${plain} 检查配置文件（不启动服务）
   ${green}23.${plain} 删除节点（按 NodeID 删除整段配置）
@@ -1700,7 +1721,7 @@ show_menu() {
  "
  #后续更新可加入上方字符串中
     show_status
-    echo && read -rp "请输入选择 [0-25]: " num
+    echo && read -rp "请输入选择 [0-26]: " num
 
     case "${num}" in
         0) config ;;
@@ -1729,7 +1750,8 @@ show_menu() {
         23) delete_node_config ;;
         24) exit ;;
         25) check_install && ws_scan_menu ;;
-        *) echo -e "${red}请输入正确的数字 [0-25]${plain}" ;;
+        26) check_install && domain_usage_menu ;;
+        *) echo -e "${red}请输入正确的数字 [0-26]${plain}" ;;
     esac
 }
 
