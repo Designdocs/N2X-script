@@ -1253,6 +1253,24 @@ install_geodata_files() {
     return 0
 }
 
+latest_release_version() {
+    local page=https://github.com/Designdocs/N2X/releases
+    local stable='^v[0-9]+\.[0-9]+\.[0-9]+$' redirect tag metadata
+    local opts=(-q --proto '=https' --proto-redir '=https' -fsS --connect-timeout 10 --max-time 30)
+    if redirect=$(curl "${opts[@]}" -I -o /dev/null -w '%{redirect_url}' "$page/latest") &&
+        [[ "$redirect" == "$page/tag/"* ]]; then
+        tag=${redirect#"$page/tag/"}
+        if [[ "$tag" =~ $stable ]]; then
+            printf '%s\n' "$tag"
+            return 0
+        fi
+    fi
+    metadata=$(curl "${opts[@]}" -L https://api.github.com/repos/Designdocs/N2X/releases/latest) || return 1
+    tag=$(sed -nE 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' <<< "$metadata")
+    [[ "$tag" =~ $stable ]] || return 1
+    printf '%s\n' "$tag"
+}
+
 scheduled_release_is_newer() {
     local latest="${1#v}" current="${2#v}"
     [[ "$latest" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$current" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 2
@@ -1426,11 +1444,10 @@ install_N2X() {
     mkdir -p "$extracted_dir" || die "创建解压目录失败"
     cd "$staging_root" || die "切换到临时目录失败"
 
-    if  [ $# == 0 ] ;then
-        last_version=$(curl -fsSL --connect-timeout 10 --max-time 30 "https://api.github.com/repos/Designdocs/N2X/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-        if [[ ! -n "$last_version" ]]; then
+    if [[ $# == 0 ]]; then
+        if ! last_version=$(latest_release_version); then
             rm -rf "$staging_root" >/dev/null 2>&1 || true
-            die "检测 N2X 版本失败，可能是超出 Github API 限制，请稍后再试，或手动指定 N2X 版本安装"
+            die "获取 N2X 最新稳定版失败。请稍后重试，或从 https://github.com/Designdocs/N2X/releases 确认版本后执行 N2X update <版本号>。"
         fi
         if [[ -n "${scheduled_day:-}" ]]; then
             installed_version="$("${N2X_BIN:-/usr/local/N2X/N2X}" version | awk '$1 == "N2X" { print $2; exit }')"

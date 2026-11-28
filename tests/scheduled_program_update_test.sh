@@ -6,6 +6,7 @@ work_dir="$(mktemp -d)"
 trap 'rm -rf "$work_dir"' EXIT
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 source "$repo_dir/geodata.sh"
+eval "$(awk '/^latest_release_version\(\) \{$/,/^\}$/' "$repo_dir/install.sh")"
 eval "$(awk '/^scheduled_release_is_newer\(\) \{$/,/^\}$/' "$repo_dir/install.sh")"
 eval "$(awk '/^download_verified_release\(\) \{$/,/^\}$/' "$repo_dir/install.sh")"
 eval "$(awk '/^install_N2X\(\) \{$/ { inside=1 } /^echo -e.*开始安装/ { exit } inside { print }' "$repo_dir/install.sh")"
@@ -26,7 +27,16 @@ maintenance_clock() { printf '%s\n' "$fake_clock"; }
 log_info() { :; }
 log_warn() { :; }
 die() { printf '%s\n' "$*" >&2; exit 1; }
-curl() { printf '{ "tag_name": "%s" }\n' "$latest"; }
+curl() {
+    case "${!#}" in
+        https://github.com/Designdocs/N2X/releases/latest) printf '%s' "$mock_redirect" ;;
+        https://api.github.com/repos/Designdocs/N2X/releases/latest)
+            [[ "$api_available" == yes ]] || return 22
+            printf '{"id":42,"tag_name":"%s"}\n' "$latest"
+            ;;
+        *) return 1 ;;
+    esac
+}
 pick_asset_suffix() { printf 'linux-64\n'; }
 download_file() {
     printf 'download\n' >> "$TEST_TRACE"
@@ -44,6 +54,18 @@ systemctl() { printf 'systemctl %s\n' "$*" >> "$TEST_TRACE"; }
 swap_installation_dir() { fail 'unexpected installation switch'; }
 
 latest=v0.17.10
+mock_redirect="https://github.com/Designdocs/N2X/releases/tag/$latest"
+api_available=no
+[[ "$(latest_release_version)" == "$latest" ]] || fail 'web lookup needs a working API'
+mock_redirect="https://example.org/Designdocs/N2X/releases/tag/$latest"
+if latest_release_version; then fail 'foreign redirect was accepted'; fi
+api_available=yes
+[[ "$(latest_release_version)" == "$latest" ]] || fail 'API fallback failed'
+latest=v0.17.11-rc.1
+mock_redirect="https://github.com/Designdocs/N2X/releases/tag/$latest"
+if latest_release_version; then fail 'prerelease was accepted as stable'; fi
+latest=v0.17.10
+mock_redirect=''
 : > "$TEST_TRACE"
 (install_N2X) || fail 'same version should skip successfully'
 [[ ! -s "$TEST_TRACE" ]] || fail 'same version downloaded a release or touched the service'
