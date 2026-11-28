@@ -14,7 +14,7 @@
 # config_gen.sh -> download_block.sh -> outbound_unlock.sh 的顺序 source。
 
 # 颜色变量由 N2X.sh 在 source 本文件之前定义；被 tests/ 单独 source 时补空值兜底。
-: "${red:=}" "${green:=}" "${yellow:=}" "${plain:=}"
+: "${red:=}" "${green:=}" "${yellow:=}" "${plain:=}" "${cyan:=}"
 
 OUTBOUND_UNLOCK_RULE_TAG_PREFIX="custom-unlock"
 # 这几个标签是默认配置里的固定角色，被顶掉会让路由整个失效。
@@ -589,8 +589,8 @@ outbound_unlock_list() {
     local ob rt
     ob="$(outbound_unlock_outbound_path)"
     rt="$(outbound_unlock_route_path)"
-    echo -e "出站文件：${ob}"
-    echo -e "路由文件：${rt}"
+    printf '出站文件：%s%s%s\n' "$cyan" "$ob" "$plain"
+    printf '路由文件：%s%s%s\n' "$cyan" "$rt" "$plain"
     echo "------------------------------------------"
     if [[ ! -f "$ob" || ! -f "$rt" ]]; then
         echo -e "${yellow}配置文件缺失，请先「生成 N2X 配置文件」。${plain}"
@@ -1167,13 +1167,13 @@ outbound_unlock_menu() {
     current="$(outbound_unlock_tags)"
     [[ -z "$current" ]] && current="（无）"
     echo -e "
-  ${green}出口解锁设置${plain}   当前自定义：${current}
+  ${cyan}出口解锁设置${plain}   当前自定义：${cyan}${current}${plain}
 ————————————————
-  ${green}1.${plain} 添加自定义解锁（可连续添加）
-  ${green}2.${plain} 增加代理规则
-  ${green}3.${plain} 查看当前自定义解锁
-  ${green}4.${plain} 清除自定义（恢复两个文件为默认）
-  ${green}5.${plain} 返回 N2X 主菜单
+  1. ${green}添加自定义解锁${plain}（可连续添加）
+  2. ${green}增加代理规则${plain}
+  3. 查看${cyan}当前自定义解锁${plain}
+  4. ${red}清除自定义${plain}（恢复两个文件为默认）
+  5. 返回 N2X 主菜单
  "
     read -rp "请输入选择 [1-5]: " num || return 0
     case "${num}" in

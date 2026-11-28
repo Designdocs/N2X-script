@@ -19,7 +19,7 @@
 
 # 颜色变量由 N2X.sh 在 source 本文件之前定义。被 tests/ 单独 source 时它们不存在，
 # set -u 下引用未定义变量会直接中断整个脚本，所以补一个空值兜底（已定义则不覆盖）。
-: "${red:=}" "${green:=}" "${yellow:=}" "${plain:=}"
+: "${red:=}" "${green:=}" "${yellow:=}" "${plain:=}" "${cyan:=}"
 
 # 分组 -> ruleTag 列表。未知分组返回非零，这是唯一一处定义，菜单和命令行都查这里。
 download_block_group_tags() {
@@ -319,7 +319,7 @@ download_block_state() {
 download_block_state_label() {
     case "$(download_block_state "${1:-all}")" in
         on)  printf '%b' "${green}已开启${plain}" ;;
-        off) printf '%b' "${red}已关闭${plain}" ;;
+        off) printf '%b' "${yellow}已关闭${plain}" ;;
         *)   printf '%b' "${yellow}未知（route.json 缺失或无法解析）${plain}" ;;
     esac
 }
@@ -467,12 +467,12 @@ download_block_show_rules() {
     echo -e "配置文件：$(download_block_route_path)"
     echo "------------------------------------------"
     echo -e "${yellow}BT 协议/端口拦截${plain}   当前状态：$(download_block_state_label traffic)"
-    echo "  download-block-protocol  协议嗅探判定为 bittorrent 的流量"
-    echo "  download-block-port      BT 常用端口 6881-6889,6969,2710,51413"
+    echo "  ${cyan}download-block-protocol${plain}  协议嗅探判定为 bittorrent 的流量"
+    echo "  ${cyan}download-block-port${plain}      BT 常用端口 6881-6889,6969,2710,51413"
     echo "  认流量特征，基本不会误伤正常网站。"
     echo "------------------------------------------"
     echo -e "${yellow}下载站域名拦截${plain}     当前状态：$(download_block_state_label domain)"
-    echo "  download-block-domain    bittorrent/utorrent、xunlei/sandai、ed2k/announce 域名"
+    echo "  ${cyan}download-block-domain${plain}    bittorrent/utorrent、xunlei/sandai、ed2k/announce 域名"
     echo "  认域名字样，torrentmac、torrentfreak 这类资讯/软件站会跟着被拦。"
     echo "------------------------------------------"
     echo -e "${yellow}不受本开关影响（始终生效）：${plain}"
@@ -490,15 +490,15 @@ before_download_block_menu() {
 
 download_block_menu() {
     echo -e "
-  ${green}下载拦截管理${plain}
+  ${cyan}下载拦截管理${plain}
 ————————————————
-  ${green}1.${plain} 切换 BT 协议/端口拦截    当前：$(download_block_state_label traffic)
-  ${green}2.${plain} 切换 下载站域名拦截      当前：$(download_block_state_label domain)
+  1. 切换 ${cyan}BT 协议/端口${plain}拦截    当前：$(download_block_state_label traffic)
+  2. 切换 ${cyan}下载站域名${plain}拦截      当前：$(download_block_state_label domain)
 ————————————————
-  ${green}3.${plain} 两组全部开启
-  ${green}4.${plain} 两组全部关闭
-  ${green}5.${plain} 查看拦截规则与状态
-  ${green}6.${plain} 返回 N2X 主菜单
+  3. 两组${green}全部开启${plain}
+  4. 两组${yellow}全部关闭${plain}
+  5. 查看拦截${cyan}规则与状态${plain}
+  6. 返回 N2X 主菜单
  "
     read -rp "请输入选择 [1-6]: " num
     case "${num}" in

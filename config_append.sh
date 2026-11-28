@@ -665,7 +665,7 @@ EOF
     echo -e "${yellow}当前配置概况（${cfg}）：${plain}"
     echo -e "  已有节点：${node_count} 个"
     if [[ -n "$node_table" ]]; then
-        echo "$node_table"
+        printf '%s%s%s\n' "${cyan:-}" "$node_table" "$plain"
     fi
     core_list=""
     if [[ "$has_xray" == "true" ]]; then
@@ -794,7 +794,7 @@ delete_node_configs() {
         return 1
     fi
     echo -e "${yellow}当前节点（协议=NodeID）：${plain}"
-    printf '%s\n' "$node_table"
+    printf '%s%s%s\n' "${cyan:-}" "$node_table" "$plain"
     echo -e "${yellow}输入 ID 即删除该 ID 的全部节点配置；原配置会备份为 ${cfg}.bak。${plain}"
     if [[ "$trimmed" == true ]]; then
         echo -e "${yellow}保存时会转为标准 JSON，注释将保留在备份文件中。${plain}"

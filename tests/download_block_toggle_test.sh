@@ -260,7 +260,7 @@ install = (repo / "install.sh").read_text()
 assert 'source "$SCRIPT_DIR/download_block.sh"' in n2x, "N2X.sh 未 source download_block.sh"
 assert "source /usr/local/N2X/download_block.sh" in n2x, "N2X.sh 缺少已安装路径的兜底 source"
 
-assert "20.${plain} 下载拦截管理" in n2x, "主菜单没有下载拦截入口"
+assert "20. ${cyan}下载拦截管理" in n2x, "主菜单没有下载拦截入口"
 assert "20) download_block_menu ;;" in n2x, "主菜单 20 未接到 download_block_menu"
 # 退出项的编号会随着新菜单往后挪，这里只钉住"下载拦截在 20 且退出排在它后面"。
 assert "21) outbound_unlock_menu ;;" in n2x or "21) exit ;;" in n2x, \

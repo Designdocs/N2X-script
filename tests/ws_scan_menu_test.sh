@@ -4,8 +4,9 @@ repo="$(cd "$(dirname "$0")/.." && pwd)"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 source "$repo/config_append.sh"
-sed -n '/^ws_scan_menu() {/,/^}/p' "$repo/N2X.sh" >"$work/menu.sh"
+sed -n -e '/^init_menu_colors() {/,/^}/p' -e '/^ws_scan_menu() {/,/^}/p' "$repo/N2X.sh" >"$work/menu.sh"
 source "$work/menu.sh"
+init_menu_colors > /dev/null
 export N2X_CONFIG_DIR="$work" N2X_WS_SCAN_STATE_DIR="$work/state"
 config_apply_saved() { n2x_config_py ws-setting "$1" status >>"$work/applied"; }
 show_menu() { :; }

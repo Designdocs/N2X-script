@@ -1,9 +1,17 @@
 #!/bin/bash
 
-red='\033[0;31m'
-green='\033[0;32m'
-yellow='\033[0;33m'
-plain='\033[0m'
+init_menu_colors() {
+    red='' green='' yellow='' cyan='' plain=''
+    if [[ -t 1 && ${TERM:-} != dumb && -z ${NO_COLOR:-} ]]; then
+        red=$'\033[31m'
+        green=$'\033[32m'
+        yellow=$'\033[33m'
+        cyan=$'\033[36m'
+        plain=$'\033[0m'
+    fi
+}
+init_menu_colors
+
 ENV_PATH="/etc/N2X/.env"
 CADDY_SETTINGS_PATH="/etc/N2X/caddy/settings.env"
 CADDYFILE_PATH="/etc/caddy/Caddyfile"
@@ -839,15 +847,15 @@ before_caddy_menu() {
 
 caddy_menu() {
     echo -e "
-  ${green}Caddy 分流管理${plain}
+  ${cyan}Caddy 分流管理${plain}
 ————————————————
-  ${green}1.${plain} 安装/重新配置 Caddy
-  ${green}2.${plain} 修改 Caddy 参数并重启
-  ${green}3.${plain} 重启 Caddy
-  ${green}4.${plain} 查看 Caddy 状态
-  ${green}5.${plain} 查看 Caddy 日志
-  ${green}6.${plain} 卸载 Caddy
-  ${green}7.${plain} 返回 N2X 主菜单
+  1. ${yellow}安装/重新配置${plain} Caddy
+  2. ${yellow}修改 Caddy 参数并重启${plain}
+  3. ${yellow}重启 Caddy${plain}
+  4. 查看 Caddy ${cyan}状态${plain}
+  5. 查看 Caddy ${cyan}日志${plain}
+  6. ${red}卸载 Caddy${plain}
+  7. 返回 N2X 主菜单
  "
     read -rp "请输入选择 [1-7]: " num
     case "${num}" in
@@ -1390,7 +1398,7 @@ show_enable_status() {
     if [[ $? == 0 ]]; then
         echo -e "是否开机自启: ${green}是${plain}"
     else
-        echo -e "是否开机自启: ${red}否${plain}"
+        echo -e "是否开机自启: ${yellow}否${plain}"
     fi
 }
 
@@ -1606,40 +1614,44 @@ open_ports() {
 show_usage() {
     echo "N2X 管理脚本使用方法: "
     echo "------------------------------------------"
-    echo "N2X              - 显示管理菜单 (功能更多)"
-    echo "N2X start        - 启动 N2X"
-    echo "N2X stop         - 停止 N2X"
-    echo "N2X restart      - 重启 N2X"
-    echo "N2X status       - 查看 N2X 状态"
-    echo "N2X enable       - 设置 N2X 开机自启"
-    echo "N2X disable      - 取消 N2X 开机自启"
-    echo "N2X log          - 查看 N2X 日志"
-    echo "N2X env          - 创建/检测 .env"
-    echo "N2X caddy        - 管理 Caddy 443 分流"
-    echo "N2X update_shell - 升级脚本"
-    echo "N2X x25519       - 生成 x25519 密钥"
-    echo "N2X generate     - 生成 N2X 配置文件（重建，会覆盖已有节点）"
-    echo "N2X addnode      - 在已有配置上增加协议配置"
-    echo "N2X delnode      - 列出现有节点并按 NodeID 删除节点配置"
-    echo "N2X check        - 检查 N2X 配置文件（不启动服务）"
-    echo "N2X update       - 更新 N2X"
-    echo "N2X update x.x.x - 安装 N2X 指定版本"
-    echo "N2X update geodata [-r] - 下载并替换 Geo 数据；-r 登记到上海时间周日 03:30 生效"
-    echo "N2X maintenance schedule - 迁移旧任务，启用上海凌晨维护计划"
-    echo "N2X install      - 安装 N2X"
-    echo "N2X uninstall    - 卸载 N2X"
-    echo "N2X version      - 查看 N2X 版本"
-    echo "N2X download on|off|status [traffic|domain] - 下载拦截分组启停"
-    echo "N2X unlock add|list|clear - 出口解锁设置"
+    echo "${cyan}N2X${plain}              - 显示管理菜单 (功能更多)"
+    echo "${cyan}N2X start${plain}        - 启动 N2X"
+    echo "${cyan}N2X stop${plain}         - 停止 N2X"
+    echo "${cyan}N2X restart${plain}      - 重启 N2X"
+    echo "${cyan}N2X status${plain}       - 查看 N2X 状态"
+    echo "${cyan}N2X enable${plain}       - 设置 N2X 开机自启"
+    echo "${cyan}N2X disable${plain}      - 取消 N2X 开机自启"
+    echo "${cyan}N2X log${plain}          - 查看 N2X 日志"
+    echo "${cyan}N2X env${plain}          - 创建/检测 .env"
+    echo "${cyan}N2X caddy${plain}        - 管理 Caddy 443 分流"
+    echo "${cyan}N2X update_shell${plain} - 升级脚本"
+    echo "${cyan}N2X x25519${plain}       - 生成 x25519 密钥"
+    echo "${cyan}N2X generate${plain}     - 生成 N2X 配置文件（重建，会覆盖已有节点）"
+    echo "${cyan}N2X addnode${plain}      - 在已有配置上增加协议配置"
+    echo "${cyan}N2X delnode${plain}      - 列出现有节点并按 NodeID 删除节点配置"
+    echo "${cyan}N2X check${plain}        - 检查 N2X 配置文件（不启动服务）"
+    echo "${cyan}N2X update${plain}       - 更新 N2X"
+    echo "${cyan}N2X update x.x.x${plain} - 安装 N2X 指定版本"
+    echo "${cyan}N2X update geodata [-r]${plain} - 下载并替换 Geo 数据；-r 登记到上海时间周日 03:30 生效"
+    echo "${cyan}N2X maintenance schedule${plain} - 迁移旧任务，启用上海凌晨维护计划"
+    echo "${cyan}N2X install${plain}      - 安装 N2X"
+    echo "${cyan}N2X uninstall${plain}    - 卸载 N2X"
+    echo "${cyan}N2X version${plain}      - 查看 N2X 版本"
+    echo "${cyan}N2X download on|off|status [traffic|domain]${plain} - 下载拦截分组启停"
+    echo "${cyan}N2X unlock add|list|clear${plain} - 出口解锁设置"
     echo "------------------------------------------"
 }
 
 ws_scan_menu() {
     local cfg="${N2X_CONFIG_DIR:-/etc/N2X}/config.json"
-    local state="${N2X_WS_SCAN_STATE_DIR:-/var/lib/N2X/ws-scan}" current choice action
+    local state="${N2X_WS_SCAN_STATE_DIR:-/var/lib/N2X/ws-scan}" current choice action state_color
     while true; do
         current="$(n2x_config_py ws-setting "$cfg" status)" || return 1
-        printf '\n节点扫描防护（配置%s）\n1. 开启防护\n2. 关闭防护\n3. 查看拦截日志\n4. 查看已封禁 IP\n0. 返回\n' "$current"
+        state_color=$yellow
+        if [[ "$current" == 已开启 ]]; then state_color=$green; fi
+        printf '\n%s节点扫描防护%s（配置%s%s%s）\n' "$cyan" "$plain" "$state_color" "$current" "$plain"
+        printf '%s\n' "1. ${green}开启防护${plain}" "2. ${yellow}关闭防护${plain}" \
+            "3. 查看${cyan}拦截日志${plain}" "4. 查看${cyan}已封禁 IP${plain}" "0. 返回"
         read -rp "请选择 [0-4]: " choice || return
         case "$choice" in
             1|2)
@@ -1660,20 +1672,37 @@ ws_scan_menu() {
 }
 
 domain_usage_menu() {
-    local config_dir="${N2X_CONFIG_DIR:-/etc/N2X}" marker state choice
+    local config_dir="${N2X_CONFIG_DIR:-/etc/N2X}" marker state state_color choice uid period day
     marker="$config_dir/domain-usage.disabled"
     while true; do
         state=开启
-        if [[ -e "$marker" || -L "$marker" ]]; then state=关闭; fi
-        printf '\n域名统计与汇报（当前设置：%s）\n1. 开启\n2. 关闭\n0. 返回\n' "$state"
+        state_color=$green
+        if [[ -e "$marker" || -L "$marker" ]]; then
+            state=关闭
+            state_color=$yellow
+        fi
+        printf '\n%s域名统计与汇报%s（当前设置：%s%s%s）\n' "$cyan" "$plain" "$state_color" "$state" "$plain"
+        "${N2X_BIN:-/usr/local/N2X/N2X}" domain-usage-status 2>/dev/null || printf '%s\n' "${yellow}统计状态暂不可用，请确认节点程序支持状态查询${plain}"
+        printf '\n'
+        printf '%s\n' "1. ${green}开启${plain}" "2. ${yellow}关闭${plain}" "3. 查询${cyan}用户域名用量${plain}" "0. 返回"
         read -rp "请选择: " choice || return
         case "$choice" in
             1) rm -f -- "$marker" || echo "保存设置失败" >&2 ;;
             2) if [[ ! -e "$marker" && ! -L "$marker" ]]; then
                    (umask 077; mkdir -p -- "$config_dir" && set -C && : > "$marker") || echo "保存设置失败" >&2
                fi ;;
+            3) read -rp "用户 ID: " uid || return
+               [[ "$uid" =~ ^[1-9][0-9]*$ ]] || { echo "用户 ID 须为正整数"; continue; }
+               read -rp "范围（1. 近 30 天  2. 单日）: " period || return
+               case "$period" in
+                   1) "${N2X_BIN:-/usr/local/N2X/N2X}" domain-usage "$uid" ;;
+                   2) read -rp "UTC 日期（YYYY-MM-DD）: " day || return
+                      [[ -n "$day" ]] || { echo "请填写 UTC 日期"; continue; }
+                      "${N2X_BIN:-/usr/local/N2X/N2X}" domain-usage "$uid" --day "$day" ;;
+                   *) echo "请选择 1 或 2" ;;
+               esac ;;
             0) break ;;
-            *) echo "请输入 0 至 2" ;;
+            *) echo "请输入 0 至 3" ;;
         esac
     done
     show_menu
@@ -1681,43 +1710,43 @@ domain_usage_menu() {
 
 show_menu() {
     echo -e "
-  ${green}N2X 后端管理脚本，${plain}${red}不适用于docker${plain}
+  ${cyan}N2X 后端管理脚本，${plain}${red}不适用于docker${plain}
 --- https://github.com/Designdocs/N2X ---
-  ${green}0.${plain} 修改配置
+  0. ${cyan}修改配置${plain}
 ————————————————
-  ${green}1.${plain} 安装 N2X
-  ${green}2.${plain} 更新 N2X
-  ${green}3.${plain} 卸载 N2X
+  1. ${green}安装 N2X${plain}
+  2. ${cyan}更新 N2X${plain}
+  3. ${red}卸载 N2X${plain}
 ————————————————
-  ${green}4.${plain} 启动 N2X
-  ${green}5.${plain} 停止 N2X
-  ${green}6.${plain} 重启 N2X
-  ${green}7.${plain} 查看 N2X 状态
-  ${green}8.${plain} 查看 N2X 日志
+  4. ${green}启动 N2X${plain}
+  5. ${yellow}停止 N2X${plain}
+  6. ${yellow}重启 N2X${plain}
+  7. 查看 N2X ${cyan}状态${plain}
+  8. 查看 N2X ${cyan}日志${plain}
 ————————————————
-  ${green}9.${plain} 设置 N2X 开机自启
-  ${green}10.${plain} 取消 N2X 开机自启
+  9. ${green}设置 N2X 开机自启${plain}
+  10. ${yellow}取消 N2X 开机自启${plain}
 ———— ${yellow}系统与工具${plain} ————
-  ${green}11.${plain} 一键安装 bbr (最新内核)
-  ${green}12.${plain} 查看 N2X 版本
-  ${green}13.${plain} 生成 X25519 密钥
-  ${green}14.${plain} 升级脚本
+  11. 一键安装 ${cyan}bbr${plain} (最新内核)
+  12. 查看 N2X ${cyan}版本${plain}
+  13. 生成 ${cyan}X25519${plain} 密钥
+  14. ${cyan}升级脚本${plain}
 ———— ${yellow}配置生成${plain} ————
-  ${green}15.${plain} 生成 N2X 配置文件（重建，会覆盖已有节点）
-  ${green}16.${plain} 增加协议配置（在已有配置上追加节点）
-  ${green}17.${plain} 创建/检测 .env 文件
+  15. 生成 N2X 配置文件（重建，${red}会覆盖已有节点${plain}）
+  16. ${green}增加协议配置${plain}（在已有配置上追加节点）
+  17. 创建/检测 ${cyan}.env${plain} 文件
 ———— ${yellow}网络管理${plain} ————
-  ${green}18.${plain} 放行 VPS 的所有网络端口
-  ${green}19.${plain} Caddy 443 分流管理
-  ${green}20.${plain} 下载拦截管理（BT/P2P 启停）
-  ${green}21.${plain} 出口解锁设置（自定义 http/socks 分流）
-  ${green}25.${plain} 节点扫描防护
-  ${green}26.${plain} 域名统计与汇报
+  18. 放行 VPS 的${yellow}所有网络端口${plain}
+  19. ${cyan}Caddy 443${plain} 分流管理
+  20. ${cyan}下载拦截管理${plain}（BT/P2P 启停）
+  21. ${cyan}出口解锁设置${plain}（自定义 http/socks 分流）
+  25. ${cyan}节点扫描防护${plain}
+  26. ${cyan}域名统计与汇报${plain}
 ———— ${yellow}检查与清理${plain} ————
-  ${green}22.${plain} 检查配置文件（不启动服务）
-  ${green}23.${plain} 删除节点（按 NodeID 删除整段配置）
+  22. ${cyan}检查配置文件${plain}（不启动服务）
+  23. ${red}删除节点${plain}（按 NodeID 删除整段配置）
 ————————————————
-  ${green}24.${plain} 退出脚本
+  24. 退出脚本
  "
  #后续更新可加入上方字符串中
     show_status
